@@ -17,11 +17,11 @@ pub struct RankedProfile {
     #[serde(rename = "assists")]
     pub ranked_assists: i32,
     #[serde(rename = "score")]
-    pub ranked_score: i32,
+    pub ranked_score: i64,
     #[serde(rename = "damage_done")]
-    pub ranked_damage_done: i32,
+    pub ranked_damage_done: i64,
     #[serde(rename = "time_played")]
-    pub ranked_time_played: i32,
+    pub ranked_time_played: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,21 +42,21 @@ pub struct Player {
     #[serde(rename = "ranked")]
     pub player_ranked: Vec<RankedProfile>,
     #[serde(rename = "kr")]
-    pub player_kr: i32,
+    pub player_kr: u64,
     #[serde(rename = "level")]
     pub player_level: i32,
     #[serde(rename = "junk")]
     pub player_junk: f64,
     #[serde(rename = "inventory")]
-    pub player_inventory: i32,
+    pub player_inventory: u64,
     #[serde(rename = "score")]
-    pub player_score: i32,
+    pub player_score: u64,
     #[serde(rename = "spk")]
     pub player_spk: f64,
     #[serde(rename = "kills")]
-    pub player_kills: i32,
+    pub player_kills: u64,
     #[serde(rename = "deaths")]
-    pub player_deaths: i32,
+    pub player_deaths: u64,
     #[serde(rename = "kdr")]
     pub player_kdr: f64,
     #[serde(rename = "kpg")]
@@ -82,13 +82,13 @@ pub struct Player {
     #[serde(rename = "wallbangs")]
     pub player_wallbangs: i32,
     #[serde(rename = "shots")]
-    pub player_shots: i32,
+    pub player_shots: u64,
     #[serde(rename = "hits")]
-    pub player_hits: i32,
+    pub player_hits: u64,
     #[serde(rename = "misses")]
-    pub player_misses: i32,
+    pub player_misses: u64,
     #[serde(rename = "time_played")]
-    pub player_time_played: i32,
+    pub player_time_played: i64,
     #[serde(rename = "nukes")]
     pub player_nukes: i32,
     #[serde(rename = "airdrops")]
@@ -138,9 +138,9 @@ pub struct PlayerMatch {
     #[serde(rename = "assists")]
     pub pm_assists: i32,
     #[serde(rename = "score")]
-    pub pm_score: i32,
+    pub pm_score: i64,
     #[serde(rename = "damage_done")]
-    pub pm_damage_done: i32,
+    pub pm_damage_done: i64,
     #[serde(rename = "headshots")]
     pub pm_headshots: i32,
     #[serde(rename = "accuracy")]
@@ -156,7 +156,7 @@ pub struct PlayerMatch {
     #[serde(rename = "team")]
     pub pm_team: i32,
     #[serde(rename = "play_time")]
-    pub pm_play_time: i32,
+    pub pm_play_time: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,9 +202,9 @@ pub struct MatchParticipant {
     #[serde(rename = "assists")]
     pub mp_assists: i32,
     #[serde(rename = "score")]
-    pub mp_score: i32,
+    pub mp_score: i64,
     #[serde(rename = "damage_done")]
-    pub mp_damage_done: i32,
+    pub mp_damage_done: i64,
     #[serde(rename = "headshots")]
     pub mp_headshots: i32,
     #[serde(rename = "accuracy")]
@@ -218,7 +218,7 @@ pub struct MatchParticipant {
     #[serde(rename = "team")]
     pub mp_team: i32,
     #[serde(rename = "play_time")]
-    pub mp_play_time: i32,
+    pub mp_play_time: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -294,9 +294,9 @@ pub struct LeaderboardEntry {
     #[serde(rename = "assists")]
     pub le_assists: i32,
     #[serde(rename = "score")]
-    pub le_score: i32,
+    pub le_score: i64,
     #[serde(rename = "damage_done")]
-    pub le_damage_done: i32,
+    pub le_damage_done: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -11,6 +11,7 @@ pub enum Error {
     Decode {
         message: String,
         body: String,
+        field: Option<String>,
     },
 }
 
@@ -19,7 +20,10 @@ impl fmt::Display for Error {
         match self {
             Error::Http(e) => write!(f, "HTTP error: {}", e),
             Error::Api { status, body } => write!(f, "API error ({}): {}", status, body),
-            Error::Decode { message, body } => write!(f, "Decode error: {} | Body: {}", message, body),
+            Error::Decode { message, body, field } => {
+                let field_str = field.as_deref().unwrap_or("unknown");
+                write!(f, "Decode error (key: {}): {} | Body: {}", field_str, message, body)
+            }
         }
     }
 }

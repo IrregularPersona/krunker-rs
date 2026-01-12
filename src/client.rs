@@ -1,28 +1,37 @@
-use reqwest::blocking::Client as HttpClient;
-use serde::de::DeserializeOwned;
 use crate::error::{Error, Result};
 use crate::types::*;
+use reqwest::blocking::Client as HttpClient;
+use serde::de::DeserializeOwned;
+use serde_path_to_error;
 
 pub struct Client {
     base_url: String,
     http: HttpClient,
     api_key: String,
+    debug: bool,
 }
 
 impl Client {
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let http = HttpClient::builder().build()?;
         Ok(Self {
-            base_url: "https://gapi.svc.krunker.io/api".to_string(),
+            base_url: "http://gapi.svc.krunker.io/api".to_string(),
             http,
             api_key: api_key.into(),
+            debug: false,
         })
+    }
+
+    pub fn set_debug(&mut self, debug: bool) {
+        self.debug = debug;
     }
 
     /// Internal helper to make requests
     fn request<T: DeserializeOwned>(&self, path: &str, params: &[(&str, String)]) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
-        let mut request = self.http.get(&url)
+        let mut request = self
+            .http
+            .get(&url)
             .header("X-Developer-API-Key", &self.api_key);
 
         if !params.is_empty() {
@@ -34,9 +43,17 @@ impl Client {
 
         if status.is_success() {
             let body = response.text()?;
-            serde_json::from_str(&body).map_err(|e| Error::Decode {
-                message: e.to_string(),
-                body,
+            if self.debug {
+                println!("DEBUG: Raw response body:\n{}", body);
+            }
+            let jd = &mut serde_json::Deserializer::from_str(&body);
+            serde_path_to_error::deserialize(jd).map_err(|e| {
+                let path = e.path().to_string();
+                Error::Decode {
+                    message: e.into_inner().to_string(),
+                    body,
+                    field: Some(path),
+                }
             })
         } else {
             let body = response.text().unwrap_or_default();
@@ -52,16 +69,27 @@ impl Client {
         self.request(&format!("/player/{}/inventory", name), &[])
     }
 
-    pub fn get_player_matches(&self, name: &str, page: Option<i32>, season: Option<i32>) -> Result<PlayerMatchesResponse> {
+    pub fn get_player_matches(
+        &self,
+        name: &str,
+        page: Option<i32>,
+        season: Option<i32>,
+    ) -> Result<PlayerMatchesResponse> {
         let mut params = Vec::new();
-        if let Some(p) = page { params.push(("page", p.to_string())); }
-        if let Some(s) = season { params.push(("season", s.to_string())); }
+        if let Some(p) = page {
+            params.push(("page", p.to_string()));
+        }
+        if let Some(s) = season {
+            params.push(("season", s.to_string()));
+        }
         self.request(&format!("/player/{}/matches", name), &params)
     }
 
     pub fn get_player_posts(&self, name: &str, page: Option<i32>) -> Result<PostsResponse> {
         let mut params = Vec::new();
-        if let Some(p) = page { params.push(("page", p.to_string())); }
+        if let Some(p) = page {
+            params.push(("page", p.to_string()));
+        }
         self.request(&format!("/player/{}/posts", name), &params)
     }
 
@@ -75,13 +103,17 @@ impl Client {
 
     pub fn get_clan_members(&self, name: &str, page: Option<i32>) -> Result<ClanMembersResponse> {
         let mut params = Vec::new();
-        if let Some(p) = page { params.push(("page", p.to_string())); }
+        if let Some(p) = page {
+            params.push(("page", p.to_string()));
+        }
         self.request(&format!("/clan/{}/members", name), &params)
     }
 
     pub fn get_leaderboard(&self, region: i32, page: Option<i32>) -> Result<LeaderboardResponse> {
         let mut params = Vec::new();
-        if let Some(p) = page { params.push(("page", p.to_string())); }
+        if let Some(p) = page {
+            params.push(("page", p.to_string()));
+        }
         self.request(&format!("/leaderboard/{}", region), &params)
     }
 
@@ -89,15 +121,23 @@ impl Client {
         self.request(&format!("/map/{}", name), &[])
     }
 
-    pub fn get_map_leaderboard(&self, name: &str, page: Option<i32>) -> Result<MapLeaderboardResponse> {
+    pub fn get_map_leaderboard(
+        &self,
+        name: &str,
+        page: Option<i32>,
+    ) -> Result<MapLeaderboardResponse> {
         let mut params = Vec::new();
-        if let Some(p) = page { params.push(("page", p.to_string())); }
+        if let Some(p) = page {
+            params.push(("page", p.to_string()));
+        }
         self.request(&format!("/map/{}/leaderboard", name), &params)
     }
 
     pub fn get_mods(&self, page: Option<i32>) -> Result<ModsResponse> {
         let mut params = Vec::new();
-        if let Some(p) = page { params.push(("page", p.to_string())); }
+        if let Some(p) = page {
+            params.push(("page", p.to_string()));
+        }
         self.request("/mods", &params)
     }
 
@@ -107,7 +147,9 @@ impl Client {
 
     pub fn get_market_skin(&self, skin_index: i32, page: Option<i32>) -> Result<MarketResponse> {
         let mut params = Vec::new();
-        if let Some(p) = page { params.push(("page", p.to_string())); }
+        if let Some(p) = page {
+            params.push(("page", p.to_string()));
+        }
         self.request(&format!("/market/skin/{}", skin_index), &params)
     }
 }
