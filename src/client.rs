@@ -15,7 +15,7 @@ impl Client {
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let http = HttpClient::builder().build()?;
         Ok(Self {
-            base_url: "http://gapi.svc.krunker.io/api".to_string(),
+            base_url: "https://gapi.svc.krunker.io/api".to_string(),
             http,
             api_key: api_key.into(),
             debug: false,
