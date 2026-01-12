@@ -4,11 +4,14 @@ use reqwest::blocking::Client as HttpClient;
 use serde::de::DeserializeOwned;
 use serde_path_to_error;
 
+use std::sync::RwLock;
+
 pub struct Client {
     base_url: String,
     http: HttpClient,
     api_key: String,
     debug: bool,
+    rate_limit: RwLock<Option<RateLimitInfo>>,
 }
 
 impl Client {
@@ -19,11 +22,16 @@ impl Client {
             http,
             api_key: api_key.into(),
             debug: false,
+            rate_limit: RwLock::new(None),
         })
     }
 
     pub fn set_debug(&mut self, debug: bool) {
         self.debug = debug;
+    }
+
+    pub fn last_rate_limit(&self) -> Option<RateLimitInfo> {
+        self.rate_limit.read().unwrap().clone()
     }
 
     /// Internal helper to make requests
@@ -39,6 +47,30 @@ impl Client {
         }
 
         let response = request.send()?;
+
+        // check rate limit headers
+        let headers = response.headers();
+        let limit = headers
+            .get("X-RateLimit-Limit")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok());
+        let remaining = headers
+            .get("X-RateLimit-Remaining")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok());
+        let reset = headers
+            .get("X-RateLimit-Reset")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok());
+
+        if let (Some(limit), Some(remaining), Some(reset)) = (limit, remaining, reset) {
+            *self.rate_limit.write().unwrap() = Some(RateLimitInfo {
+                limit,
+                remaining,
+                reset,
+            });
+        }
+
         let status = response.status();
 
         if status.is_success() {
@@ -57,7 +89,19 @@ impl Client {
             })
         } else {
             let body = response.text().unwrap_or_default();
-            Err(Error::Api { status, body })
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                if let Ok(rl) = serde_json::from_str::<RateLimitResponse>(&body) {
+                    return Err(Error::RateLimit {
+                        retry_after: rl.retry_after,
+                    });
+                }
+            }
+
+            let message = serde_json::from_str::<GenericErrorResponse>(&body)
+                .map(|e| e.error)
+                .unwrap_or_else(|_| body);
+
+            Err(Error::Api { status, message })
         }
     }
 
@@ -93,7 +137,7 @@ impl Client {
         self.request(&format!("/player/{}/posts", name), &params)
     }
 
-    pub fn get_match(&self, match_id: i32) -> Result<Match> {
+    pub fn get_match(&self, match_id: i64) -> Result<Match> {
         self.request(&format!("/match/{}", match_id), &[])
     }
 
@@ -117,10 +161,14 @@ impl Client {
         self.request(&format!("/leaderboard/{}", region), &params)
     }
 
+    /// Retrieve information about a specific map.
+    /// Note: The map name is case-sensitive.
     pub fn get_map(&self, name: &str) -> Result<GameMap> {
         self.request(&format!("/map/{}", name), &[])
     }
 
+    /// Retrieve the leaderboard for a specific map.
+    /// Note: The map name is case-sensitive.
     pub fn get_map_leaderboard(
         &self,
         name: &str,

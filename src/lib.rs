@@ -1,6 +1,5 @@
 pub mod client;
 pub mod error;
-pub mod test;
 pub mod types;
 
 pub use client::Client;

@@ -6,7 +6,10 @@ pub enum Error {
     Http(reqwest::Error),
     Api {
         status: StatusCode,
-        body: String,
+        message: String,
+    },
+    RateLimit {
+        retry_after: u64,
     },
     Decode {
         message: String,
@@ -19,7 +22,10 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Http(e) => write!(f, "HTTP error: {}", e),
-            Error::Api { status, body } => write!(f, "API error ({}): {}", status, body),
+            Error::Api { status, message } => write!(f, "API error ({}): {}", status, message),
+            Error::RateLimit { retry_after } => {
+                write!(f, "Rate limit exceeded. Retry after {} seconds", retry_after)
+            }
             Error::Decode { message, body, field } => {
                 let field_str = field.as_deref().unwrap_or("unknown");
                 write!(f, "Decode error (key: {}): {} | Body: {}", field_str, message, body)

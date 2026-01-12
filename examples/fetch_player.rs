@@ -19,12 +19,16 @@ fn main() {
                     println!("Name: {:?}", player.player_name);
                     println!("Level: {}", player.player_level);
                     println!("K/D: {}", player.player_kdr);
-                    let total_seconds = player.player_time_played / 1000;
+                    let total_seconds = player.player_time_played;
                     let days = total_seconds / 86400;
                     let hours = (total_seconds % 86400) / 3600;
                     let minutes = (total_seconds % 3600) / 60;
 
                     println!("Time Played: {}d {}h {}m", days, hours, minutes);
+
+                    if let Some(rl) = client.last_rate_limit() {
+                        println!("Rate Limit: {}/{} (Reset: {})", rl.remaining, rl.limit, rl.reset);
+                    }
                 }
                 Err(err) => println!("Error: {}", err),
             }

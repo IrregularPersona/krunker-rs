@@ -120,7 +120,7 @@ pub struct InventoryItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerMatch {
     #[serde(rename = "match_id")]
-    pub pm_match_id: i32,
+    pub pm_match_id: i64,
     #[serde(rename = "date")]
     pub pm_date: String,
     #[serde(rename = "map")]
@@ -224,7 +224,7 @@ pub struct MatchParticipant {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Match {
     #[serde(rename = "match_id")]
-    pub match_id: i32,
+    pub match_id: i64,
     #[serde(rename = "date")]
     pub match_date: String,
     #[serde(rename = "map")]
@@ -246,7 +246,7 @@ pub struct Clan {
     #[serde(rename = "owner_name")]
     pub clan_owner_name: String,
     #[serde(rename = "score")]
-    pub clan_score: i32,
+    pub clan_score: i64,
     #[serde(rename = "rank")]
     pub clan_rank: i32,
     #[serde(rename = "member_count")]
@@ -328,7 +328,7 @@ pub struct GameMap {
     #[serde(rename = "gameplays")]
     pub gm_gameplays: i32,
     #[serde(rename = "playtime")]
-    pub gm_playtime: i32,
+    pub gm_playtime: i64,
     #[serde(rename = "category")]
     pub gm_category: i32,
     #[serde(rename = "created_at")]
@@ -447,4 +447,22 @@ pub struct MarketResponse {
     pub mr_owners: Vec<MarketOwner>,
     #[serde(rename = "price_history")]
     pub mr_price_history: Vec<PriceHistory>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitResponse {
+    pub error: String,
+    pub retry_after: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenericErrorResponse {
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitInfo {
+    pub limit: u32,
+    pub remaining: u32,
+    pub reset: u64,
 }
