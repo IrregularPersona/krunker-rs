@@ -1,18 +1,113 @@
 use reqwest::blocking::Client as HttpClient;
+use serde::de::DeserializeOwned;
+use crate::error::{Error, Result};
+use crate::types::*;
 
 pub struct Client {
-    pub(crate) client_base_url: String,
-    pub(crate) client: HttpClient,
-    pub(crate) api_key: String,
+    base_url: String,
+    http: HttpClient,
+    api_key: String,
 }
 
 impl Client {
-    pub fn new(api_key: impl Into<String>) -> Result<Self, reqwest::Error> {
-        let client = HttpClient::builder().build()?;
+    pub fn new(api_key: impl Into<String>) -> Result<Self> {
+        let http = HttpClient::builder().build()?;
         Ok(Self {
-            client_base_url: "https://gapi.svc.krunker.io/api".to_string(),
-            client,
+            base_url: "https://gapi.svc.krunker.io/api".to_string(),
+            http,
             api_key: api_key.into(),
         })
+    }
+
+    /// Internal helper to make requests
+    fn request<T: DeserializeOwned>(&self, path: &str, params: &[(&str, String)]) -> Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let mut request = self.http.get(&url)
+            .header("X-Developer-API-Key", &self.api_key);
+
+        if !params.is_empty() {
+            request = request.query(params);
+        }
+
+        let response = request.send()?;
+        let status = response.status();
+
+        if status.is_success() {
+            let body = response.text()?;
+            serde_json::from_str(&body).map_err(|e| Error::Decode {
+                message: e.to_string(),
+                body,
+            })
+        } else {
+            let body = response.text().unwrap_or_default();
+            Err(Error::Api { status, body })
+        }
+    }
+
+    pub fn get_player(&self, name: &str) -> Result<Player> {
+        self.request(&format!("/player/{}", name), &[])
+    }
+
+    pub fn get_player_inventory(&self, name: &str) -> Result<Vec<InventoryItem>> {
+        self.request(&format!("/player/{}/inventory", name), &[])
+    }
+
+    pub fn get_player_matches(&self, name: &str, page: Option<i32>, season: Option<i32>) -> Result<PlayerMatchesResponse> {
+        let mut params = Vec::new();
+        if let Some(p) = page { params.push(("page", p.to_string())); }
+        if let Some(s) = season { params.push(("season", s.to_string())); }
+        self.request(&format!("/player/{}/matches", name), &params)
+    }
+
+    pub fn get_player_posts(&self, name: &str, page: Option<i32>) -> Result<PostsResponse> {
+        let mut params = Vec::new();
+        if let Some(p) = page { params.push(("page", p.to_string())); }
+        self.request(&format!("/player/{}/posts", name), &params)
+    }
+
+    pub fn get_match(&self, match_id: i32) -> Result<Match> {
+        self.request(&format!("/match/{}", match_id), &[])
+    }
+
+    pub fn get_clan(&self, name: &str) -> Result<Clan> {
+        self.request(&format!("/clan/{}", name), &[])
+    }
+
+    pub fn get_clan_members(&self, name: &str, page: Option<i32>) -> Result<ClanMembersResponse> {
+        let mut params = Vec::new();
+        if let Some(p) = page { params.push(("page", p.to_string())); }
+        self.request(&format!("/clan/{}/members", name), &params)
+    }
+
+    pub fn get_leaderboard(&self, region: i32, page: Option<i32>) -> Result<LeaderboardResponse> {
+        let mut params = Vec::new();
+        if let Some(p) = page { params.push(("page", p.to_string())); }
+        self.request(&format!("/leaderboard/{}", region), &params)
+    }
+
+    pub fn get_map(&self, name: &str) -> Result<GameMap> {
+        self.request(&format!("/map/{}", name), &[])
+    }
+
+    pub fn get_map_leaderboard(&self, name: &str, page: Option<i32>) -> Result<MapLeaderboardResponse> {
+        let mut params = Vec::new();
+        if let Some(p) = page { params.push(("page", p.to_string())); }
+        self.request(&format!("/map/{}/leaderboard", name), &params)
+    }
+
+    pub fn get_mods(&self, page: Option<i32>) -> Result<ModsResponse> {
+        let mut params = Vec::new();
+        if let Some(p) = page { params.push(("page", p.to_string())); }
+        self.request("/mods", &params)
+    }
+
+    pub fn get_mod(&self, name: &str) -> Result<Mod> {
+        self.request(&format!("/mods/{}", name), &[])
+    }
+
+    pub fn get_market_skin(&self, skin_index: i32, page: Option<i32>) -> Result<MarketResponse> {
+        let mut params = Vec::new();
+        if let Some(p) = page { params.push(("page", p.to_string())); }
+        self.request(&format!("/market/skin/{}", skin_index), &params)
     }
 }
