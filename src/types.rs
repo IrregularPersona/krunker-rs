@@ -126,17 +126,17 @@ pub struct PlayerMatch {
     #[serde(rename = "map")]
     pub pm_map: i32,
     #[serde(rename = "duration")]
-    pub pm_duration: i32,
+    pub pm_duration: i64,
     #[serde(rename = "season")]
     pub pm_season: i32,
     #[serde(rename = "region")]
     pub pm_region: i32,
     #[serde(rename = "kills")]
-    pub pm_kills: i32,
+    pub pm_kills: i64,
     #[serde(rename = "deaths")]
-    pub pm_deaths: i32,
+    pub pm_deaths: i64,
     #[serde(rename = "assists")]
-    pub pm_assists: i32,
+    pub pm_assists: i64,
     #[serde(rename = "score")]
     pub pm_score: i64,
     #[serde(rename = "damage_done")]

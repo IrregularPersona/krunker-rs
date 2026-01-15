@@ -1,20 +1,20 @@
 use krunker_rs::Client;
 use std::env;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args: Vec<String> = env::args().collect();
     let debug = args.iter().any(|arg| arg == "--debug");
     let positional_args: Vec<_> = args.iter().filter(|arg| !arg.starts_with("--")).collect();
 
     match positional_args.as_slice() {
         [_, api_key, target_player] => {
-            let mut client = Client::new(api_key.to_string()).expect("Failed to create client");
-            if debug {
-                client.set_debug(true);
-            }
+            let client = Client::new(api_key.to_string()).expect("Failed to create client");
+            // if debug {
+            //     client.set_debug(true).await;
+            // }
             println!("Fetch profile: {}", target_player);
-
-            match client.get_player(target_player) {
+            match client.get_player(target_player).await {
                 Ok(player) => {
                     println!("Name: {:?}", player.player_name);
                     println!("Level: {}", player.player_level);
@@ -26,15 +26,20 @@ fn main() {
 
                     println!("Time Played: {}d {}h {}m", days, hours, minutes);
 
-                    if let Some(rl) = client.last_rate_limit() {
-                        println!("Rate Limit: {}/{} (Reset: {})", rl.remaining, rl.limit, rl.reset);
+                    if let Some(rl) = client.last_rate_limit().await {
+                        println!(
+                            "Rate Limit: {}/{} (Reset: {})",
+                            rl.remaining, rl.limit, rl.reset
+                        );
                     }
                 }
                 Err(err) => println!("Error: {}", err),
             }
         }
         _ => {
-            println!("usage: cargo run --example fetch_player -- <api-key> <player-name> [--debug]");
+            println!(
+                "usage: cargo run --example fetch_player -- <api-key> <player-name> [--debug]"
+            );
         }
     }
 }

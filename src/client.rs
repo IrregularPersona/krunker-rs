@@ -1,10 +1,9 @@
 use crate::error::{Error, Result};
 use crate::types::*;
-use reqwest::blocking::Client as HttpClient;
+use reqwest::Client as HttpClient;
 use serde::de::DeserializeOwned;
 use serde_path_to_error;
-
-use std::sync::RwLock;
+use tokio::sync::RwLock;
 
 pub struct Client {
     base_url: String,
@@ -26,16 +25,16 @@ impl Client {
         })
     }
 
-    pub fn set_debug(&mut self, debug: bool) {
+    pub async fn set_debug(&mut self, debug: bool) {
         self.debug = debug;
     }
 
-    pub fn last_rate_limit(&self) -> Option<RateLimitInfo> {
-        self.rate_limit.read().unwrap().clone()
+    pub async fn last_rate_limit(&self) -> Option<RateLimitInfo> {
+        self.rate_limit.read().await.clone()
     }
 
     /// Internal helper to make requests
-    fn request<T: DeserializeOwned>(&self, path: &str, params: &[(&str, String)]) -> Result<T> {
+    async fn request<T: DeserializeOwned>(&self, path: &str, params: &[(&str, String)]) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let mut request = self
             .http
@@ -46,7 +45,7 @@ impl Client {
             request = request.query(params);
         }
 
-        let response = request.send()?;
+        let response = request.send().await?;
 
         // check rate limit headers
         let headers = response.headers();
@@ -64,7 +63,8 @@ impl Client {
             .and_then(|v| v.parse().ok());
 
         if let (Some(limit), Some(remaining), Some(reset)) = (limit, remaining, reset) {
-            *self.rate_limit.write().unwrap() = Some(RateLimitInfo {
+            let mut rl = self.rate_limit.write().await;
+            *rl = Some(RateLimitInfo {
                 limit,
                 remaining,
                 reset,
@@ -74,7 +74,7 @@ impl Client {
         let status = response.status();
 
         if status.is_success() {
-            let body = response.text()?;
+            let body = response.text().await?;
             if self.debug {
                 println!("DEBUG: Raw response body:\n{}", body);
             }
@@ -88,7 +88,7 @@ impl Client {
                 }
             })
         } else {
-            let body = response.text().unwrap_or_default();
+            let body = response.text().await.unwrap_or_default();
             if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
                 if let Ok(rl) = serde_json::from_str::<RateLimitResponse>(&body) {
                     return Err(Error::RateLimit {
@@ -105,15 +105,15 @@ impl Client {
         }
     }
 
-    pub fn get_player(&self, name: &str) -> Result<Player> {
-        self.request(&format!("/player/{}", name), &[])
+    pub async fn get_player(&self, name: &str) -> Result<Player> {
+        self.request(&format!("/player/{}", name), &[]).await
     }
 
-    pub fn get_player_inventory(&self, name: &str) -> Result<Vec<InventoryItem>> {
-        self.request(&format!("/player/{}/inventory", name), &[])
+    pub async fn get_player_inventory(&self, name: &str) -> Result<Vec<InventoryItem>> {
+        self.request(&format!("/player/{}/inventory", name), &[]).await
     }
 
-    pub fn get_player_matches(
+    pub async fn get_player_matches(
         &self,
         name: &str,
         page: Option<i32>,
@@ -126,50 +126,58 @@ impl Client {
         if let Some(s) = season {
             params.push(("season", s.to_string()));
         }
-        self.request(&format!("/player/{}/matches", name), &params)
+        self.request(&format!("/player/{}/matches", name), &params).await
     }
 
-    pub fn get_player_posts(&self, name: &str, page: Option<i32>) -> Result<PostsResponse> {
+    pub async fn get_player_posts(&self, name: &str, page: Option<i32>) -> Result<PostsResponse> {
         let mut params = Vec::new();
         if let Some(p) = page {
             params.push(("page", p.to_string()));
         }
-        self.request(&format!("/player/{}/posts", name), &params)
+        self.request(&format!("/player/{}/posts", name), &params).await
     }
 
-    pub fn get_match(&self, match_id: i64) -> Result<Match> {
-        self.request(&format!("/match/{}", match_id), &[])
+    pub async fn get_match(&self, match_id: i64) -> Result<Match> {
+        self.request(&format!("/match/{}", match_id), &[]).await
     }
 
-    pub fn get_clan(&self, name: &str) -> Result<Clan> {
-        self.request(&format!("/clan/{}", name), &[])
+    pub async fn get_clan(&self, name: &str) -> Result<Clan> {
+        self.request(&format!("/clan/{}", name), &[]).await
     }
 
-    pub fn get_clan_members(&self, name: &str, page: Option<i32>) -> Result<ClanMembersResponse> {
+    pub async fn get_clan_members(
+        &self,
+        name: &str,
+        page: Option<i32>,
+    ) -> Result<ClanMembersResponse> {
         let mut params = Vec::new();
         if let Some(p) = page {
             params.push(("page", p.to_string()));
         }
-        self.request(&format!("/clan/{}/members", name), &params)
+        self.request(&format!("/clan/{}/members", name), &params).await
     }
 
-    pub fn get_leaderboard(&self, region: i32, page: Option<i32>) -> Result<LeaderboardResponse> {
+    pub async fn get_leaderboard(
+        &self,
+        region: i32,
+        page: Option<i32>,
+    ) -> Result<LeaderboardResponse> {
         let mut params = Vec::new();
         if let Some(p) = page {
             params.push(("page", p.to_string()));
         }
-        self.request(&format!("/leaderboard/{}", region), &params)
+        self.request(&format!("/leaderboard/{}", region), &params).await
     }
 
     /// Retrieve information about a specific map.
     /// Note: The map name is case-sensitive.
-    pub fn get_map(&self, name: &str) -> Result<GameMap> {
-        self.request(&format!("/map/{}", name), &[])
+    pub async fn get_map(&self, name: &str) -> Result<GameMap> {
+        self.request(&format!("/map/{}", name), &[]).await
     }
 
     /// Retrieve the leaderboard for a specific map.
     /// Note: The map name is case-sensitive.
-    pub fn get_map_leaderboard(
+    pub async fn get_map_leaderboard(
         &self,
         name: &str,
         page: Option<i32>,
@@ -178,26 +186,30 @@ impl Client {
         if let Some(p) = page {
             params.push(("page", p.to_string()));
         }
-        self.request(&format!("/map/{}/leaderboard", name), &params)
+        self.request(&format!("/map/{}/leaderboard", name), &params).await
     }
 
-    pub fn get_mods(&self, page: Option<i32>) -> Result<ModsResponse> {
+    pub async fn get_mods(&self, page: Option<i32>) -> Result<ModsResponse> {
         let mut params = Vec::new();
         if let Some(p) = page {
             params.push(("page", p.to_string()));
         }
-        self.request("/mods", &params)
+        self.request("/mods", &params).await
     }
 
-    pub fn get_mod(&self, name: &str) -> Result<Mod> {
-        self.request(&format!("/mods/{}", name), &[])
+    pub async fn get_mod(&self, name: &str) -> Result<Mod> {
+        self.request(&format!("/mods/{}", name), &[]).await
     }
 
-    pub fn get_market_skin(&self, skin_index: i32, page: Option<i32>) -> Result<MarketResponse> {
+    pub async fn get_market_skin(
+        &self,
+        skin_index: i32,
+        page: Option<i32>,
+    ) -> Result<MarketResponse> {
         let mut params = Vec::new();
         if let Some(p) = page {
             params.push(("page", p.to_string()));
         }
-        self.request(&format!("/market/skin/{}", skin_index), &params)
+        self.request(&format!("/market/skin/{}", skin_index), &params).await
     }
 }
