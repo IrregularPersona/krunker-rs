@@ -34,13 +34,13 @@ pub struct Player {
     #[serde(rename = "flag")]
     pub player_flag: i32,
     #[serde(rename = "badges")]
-    pub player_badges: Vec<i32>,
+    pub player_badges: Option<Vec<i32>>,
     #[serde(rename = "following")]
     pub player_following: i32,
     #[serde(rename = "followers")]
     pub player_followers: i32,
     #[serde(rename = "ranked")]
-    pub player_ranked: Vec<RankedProfile>,
+    pub player_ranked: Option<Vec<RankedProfile>>,
     #[serde(rename = "kr")]
     pub player_kr: u64,
     #[serde(rename = "level")]
@@ -166,7 +166,7 @@ pub struct PlayerMatchesResponse {
     #[serde(rename = "per_page")]
     pub pmr_per_page: i32,
     #[serde(rename = "matches")]
-    pub pmr_matches: Vec<PlayerMatch>,
+    pub pmr_matches: Option<Vec<PlayerMatch>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,7 +188,7 @@ pub struct PostsResponse {
     #[serde(rename = "per_page")]
     pub posts_per_page: i32,
     #[serde(rename = "posts")]
-    pub posts_posts: Vec<Post>,
+    pub posts_posts: Option<Vec<Post>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -236,7 +236,7 @@ pub struct Match {
     #[serde(rename = "region")]
     pub match_region: i32,
     #[serde(rename = "participants")]
-    pub match_participants: Vec<MatchParticipant>,
+    pub match_participants: Option<Vec<MatchParticipant>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -272,7 +272,7 @@ pub struct ClanMembersResponse {
     #[serde(rename = "per_page")]
     pub cmr_per_page: i32,
     #[serde(rename = "members")]
-    pub cmr_members: Vec<ClanMember>,
+    pub cmr_members: Option<Vec<ClanMember>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -310,7 +310,7 @@ pub struct LeaderboardResponse {
     #[serde(rename = "region")]
     pub lr_region: i32,
     #[serde(rename = "entries")]
-    pub lr_entries: Vec<LeaderboardEntry>,
+    pub lr_entries: Option<Vec<LeaderboardEntry>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -366,7 +366,7 @@ pub struct MapLeaderboardResponse {
     #[serde(rename = "leaderboard_order")]
     pub mlr_leaderboard_order: i32,
     #[serde(rename = "entries")]
-    pub mlr_entries: Vec<MapLeaderboardEntry>,
+    pub mlr_entries: Option<Vec<MapLeaderboardEntry>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -398,7 +398,7 @@ pub struct ModsResponse {
     #[serde(rename = "per_page")]
     pub mods_per_page: i32,
     #[serde(rename = "mods")]
-    pub mods_mods: Vec<Mod>,
+    pub mods_mods: Option<Vec<Mod>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -442,11 +442,11 @@ pub struct MarketResponse {
     #[serde(rename = "total_circulating")]
     pub mr_total_circulating: i32,
     #[serde(rename = "listings")]
-    pub mr_listings: Vec<MarketListing>,
+    pub mr_listings: Option<Vec<MarketListing>>,
     #[serde(rename = "owners")]
-    pub mr_owners: Vec<MarketOwner>,
+    pub mr_owners: Option<Vec<MarketOwner>>,
     #[serde(rename = "price_history")]
-    pub mr_price_history: Vec<PriceHistory>,
+    pub mr_price_history: Option<Vec<PriceHistory>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
