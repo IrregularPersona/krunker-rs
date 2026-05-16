@@ -3,13 +3,20 @@ use crate::types::*;
 use reqwest::Client as HttpClient;
 use serde::de::DeserializeOwned;
 use serde_path_to_error;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
+#[derive(Clone)]
 pub struct Client {
+    inner: Arc<ClientInner>,
+}
+
+struct ClientInner {
     base_url: String,
     http: HttpClient,
     api_key: String,
-    debug: bool,
+    debug: AtomicBool,
     rate_limit: RwLock<Option<RateLimitInfo>>,
 }
 
@@ -17,29 +24,32 @@ impl Client {
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let http = HttpClient::builder().build()?;
         Ok(Self {
-            base_url: "https://gapi.svc.krunker.io/api".to_string(),
-            http,
-            api_key: api_key.into(),
-            debug: false,
-            rate_limit: RwLock::new(None),
+            inner: Arc::new(ClientInner {
+                base_url: "https://gapi.svc.krunker.io/api".to_string(),
+                http,
+                api_key: api_key.into(),
+                debug: AtomicBool::new(false),
+                rate_limit: RwLock::new(None),
+            }),
         })
     }
 
-    pub async fn set_debug(&mut self, debug: bool) {
-        self.debug = debug;
+    pub fn set_debug(&self, debug: bool) {
+        self.inner.debug.store(debug, Ordering::Relaxed);
     }
 
     pub async fn last_rate_limit(&self) -> Option<RateLimitInfo> {
-        self.rate_limit.read().await.clone()
+        self.inner.rate_limit.read().await.clone()
     }
 
     /// Internal helper to make requests
     async fn request<T: DeserializeOwned>(&self, path: &str, params: &[(&str, String)]) -> Result<T> {
-        let url = format!("{}{}", self.base_url, path);
+        let url = format!("{}{}", self.inner.base_url, path);
         let mut request = self
+            .inner
             .http
             .get(&url)
-            .header("X-Developer-API-Key", &self.api_key);
+            .header("X-Developer-API-Key", &self.inner.api_key);
 
         if !params.is_empty() {
             request = request.query(params);
@@ -63,7 +73,7 @@ impl Client {
             .and_then(|v| v.parse().ok());
 
         if let (Some(limit), Some(remaining), Some(reset)) = (limit, remaining, reset) {
-            let mut rl = self.rate_limit.write().await;
+            let mut rl = self.inner.rate_limit.write().await;
             *rl = Some(RateLimitInfo {
                 limit,
                 remaining,
@@ -75,7 +85,7 @@ impl Client {
 
         if status.is_success() {
             let body = response.text().await?;
-            if self.debug {
+            if self.inner.debug.load(Ordering::Relaxed) {
                 println!("DEBUG: Raw response body:\n{}", body);
             }
             let jd = &mut serde_json::Deserializer::from_str(&body);

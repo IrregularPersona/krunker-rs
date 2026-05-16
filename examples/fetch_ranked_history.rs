@@ -1,15 +1,10 @@
 use krunker_rs::Client;
 use std::env;
-use std::time::Duration;
 
 fn get_kda(kill: i64, death: i64, assist: i64) -> f64 {
     (kill + assist) as f64 / death as f64
 }
 
-fn format_ms(ms: i64) -> String {
-    let duration = Duration::from_millis(ms as u64);
-    humantime::format_duration(duration).to_string()
-}
 
 fn print_match(pmatch: &krunker_rs::PlayerMatch) {
     println!("Match id: {}", pmatch.pm_match_id);
@@ -47,10 +42,11 @@ async fn main() {
                     .await
                 {
                     Ok(matches) => {
-                        if matches.pmr_matches.is_empty() {
+                        let pmr_matches = matches.pmr_matches.unwrap_or_default();
+                        if pmr_matches.is_empty() {
                             break;
                         }
-                        all_matches.extend(matches.pmr_matches);
+                        all_matches.extend(pmr_matches);
                     }
                     Err(err) => {
                         println!("Error on page {}: {}", page, err);

@@ -11,7 +11,7 @@ async fn main() {
 
             match client.get_player_posts(&target_player, Some(1)).await {
                 Ok(content) => {
-                    for post in content.posts_posts {
+                    for post in content.posts_posts.unwrap_or_default() {
                         println!("Date: {}", post.post_date);
                         println!("Text: {}", post.post_text);
                         println!("Votes: {}", post.post_votes);

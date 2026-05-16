@@ -20,7 +20,7 @@ async fn main() {
             for (id, name) in regions {
                 match client.get_leaderboard(id, Some(1)).await {
                     Ok(response) => {
-                        all_entries.extend(response.lr_entries);
+                        all_entries.extend(response.lr_entries.unwrap_or_default());
                     }
                     Err(err) => {
                         println!("Failed to fetch {} leaderboard: {}", name, err);

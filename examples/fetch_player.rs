@@ -10,9 +10,9 @@ async fn main() {
     match positional_args.as_slice() {
         [_, api_key, target_player] => {
             let client = Client::new(api_key.to_string()).expect("Failed to create client");
-            // if debug {
-            //     client.set_debug(true).await;
-            // }
+            if debug {
+                client.set_debug(true);
+            }
             println!("Fetch profile: {}", target_player);
             match client.get_player(target_player).await {
                 Ok(player) => {

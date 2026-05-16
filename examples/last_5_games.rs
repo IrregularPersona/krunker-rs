@@ -16,12 +16,13 @@ async fn main() {
             {
                 Ok(response) => {
                     println!("=== Last 5 Games for {} ===", target_player);
-                    if response.pmr_matches.is_empty() {
+                    let pmr_matches = response.pmr_matches.unwrap_or_default();
+                    if pmr_matches.is_empty() {
                         println!("No matches found.");
                         return;
                     }
 
-                    for (i, pmatch) in response.pmr_matches.iter().take(5).enumerate() {
+                    for (i, pmatch) in pmr_matches.iter().take(5).enumerate() {
                         println!("{}. Match ID: {}", i + 1, pmatch.pm_match_id);
                         println!("   Date: {}", pmatch.pm_date);
                         println!("   Score: {}", pmatch.pm_score);
@@ -41,7 +42,7 @@ async fn main() {
                     }
 
                     // Dump full data for the most recent game
-                    if let Some(first_match) = response.pmr_matches.first() {
+                    if let Some(first_match) = pmr_matches.first() {
                         println!("--- Full Data for Match {} ---", first_match.pm_match_id);
                         match client.get_match(first_match.pm_match_id).await {
                             Ok(match_details) => {
