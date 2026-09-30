@@ -1,45 +1,28 @@
-use krunker_rs::Client;
-use std::env;
+mod common;
 
 #[tokio::main]
-async fn main() {
-    let args: Vec<String> = env::args().collect();
-    let debug = args.iter().any(|arg| arg == "--debug");
-    let positional_args: Vec<_> = args.iter().filter(|arg| !arg.starts_with("--")).collect();
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let (client, args) = common::client_and_args(
+        1,
+        "Usage: cargo run --example fetch_player -- [api-key] <player-name> [--debug]",
+    )?;
+    let player = client.get_player(&args[0]).await?;
+    println!("Name: {}", player.player_name);
+    println!("Level: {}", player.player_level);
+    println!("K/D: {}", player.player_kdr);
+    let seconds = player.player_time_played;
+    println!(
+        "Time played: {}d {}h {}m",
+        seconds / 86_400,
+        (seconds % 86_400) / 3_600,
+        (seconds % 3_600) / 60
+    );
 
-    match positional_args.as_slice() {
-        [_, api_key, target_player] => {
-            let client = Client::new(api_key.to_string()).expect("Failed to create client");
-            if debug {
-                client.set_debug(true);
-            }
-            println!("Fetch profile: {}", target_player);
-            match client.get_player(target_player).await {
-                Ok(player) => {
-                    println!("Name: {:?}", player.player_name);
-                    println!("Level: {}", player.player_level);
-                    println!("K/D: {}", player.player_kdr);
-                    let total_seconds = player.player_time_played;
-                    let days = total_seconds / 86400;
-                    let hours = (total_seconds % 86400) / 3600;
-                    let minutes = (total_seconds % 3600) / 60;
-
-                    println!("Time Played: {}d {}h {}m", days, hours, minutes);
-
-                    if let Some(rl) = client.last_rate_limit().await {
-                        println!(
-                            "Rate Limit: {}/{} (Reset: {})",
-                            rl.remaining, rl.limit, rl.reset
-                        );
-                    }
-                }
-                Err(err) => println!("Error: {}", err),
-            }
-        }
-        _ => {
-            println!(
-                "usage: cargo run --example fetch_player -- <api-key> <player-name> [--debug]"
-            );
-        }
+    if let Some(limit) = client.last_rate_limit().await {
+        println!(
+            "Rate limit: {}/{} remaining (reset: {})",
+            limit.remaining, limit.limit, limit.reset
+        );
     }
+    Ok(())
 }

@@ -1,0 +1,36 @@
+{
+  "skin_index": 123,
+  "total_listings": 45,
+  "lowest_price": 500,
+  "average_price": 750.5,
+  "total_circulating": 3500,
+  "listings": [
+    {
+      "price": 500,
+      "seller_name": "Player1",
+      "listed_at": "2025-01-15T10:30:00Z"
+    }
+  ],
+  "owners": [
+    {
+      "player_name": "Collector1",
+      "count": 50
+    },
+    {
+      "player_name": "Collector2",
+      "count": 25
+    }
+  ],
+  "price_history": [
+    {
+      "date": "2025-12-01",
+      "average_price": 32500.5,
+      "sales": 12
+    },
+    {
+      "date": "2025-12-02",
+      "average_price": 33000.0,
+      "sales": 8
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "mod_id": 12345,
+  "name": "AwesomeMod",
+  "description": "A cool mod that changes textures",
+  "creator_name": "ModCreator",
+  "votes": 5000,
+  "featured": true,
+  "version": 15,
+  "created_at": "2023-01-15T10:30:00Z",
+  "updated_at": "2024-06-20T14:00:00Z"
+}

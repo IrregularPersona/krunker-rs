@@ -1,56 +1,75 @@
-use krunker_rs::Client;
-use std::env;
+mod common;
+
+use krunker_rs::LeaderboardEntry;
+use std::{cmp::Reverse, collections::HashSet};
+
+fn deduplicate_entries(entries: &mut Vec<LeaderboardEntry>) {
+    entries.sort_by_key(|entry| Reverse(entry.le_mmr));
+    let mut seen = HashSet::new();
+    entries.retain(|entry| seen.insert(entry.le_player_name.clone()));
+}
 
 #[tokio::main]
-async fn main() {
-    let args: Vec<String> = env::args().collect();
-    let pos_args: Vec<_> = args.iter().filter(|arg| !arg.starts_with("--")).collect();
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let (client, _) = common::client_and_args(
+        0,
+        "Usage: cargo run --example global_leaderboard -- [api-key] [--debug]",
+    )?;
+    let mut entries = Vec::new();
+    for region in [2, 3, 4] {
+        entries.extend(
+            client
+                .get_leaderboard(region, Some(1))
+                .await?
+                .lr_entries
+                .unwrap_or_default(),
+        );
+    }
+    if entries.is_empty() {
+        println!("No leaderboard entries found.");
+        return Ok(());
+    }
+    deduplicate_entries(&mut entries);
+    println!("=== Top 10 Players Across Asia, Europe, and North America ===");
+    for (index, entry) in entries.iter().take(10).enumerate() {
+        println!(
+            "{:2}. {:<20} | MMR: {:<5} | Win/Loss: {}/{}",
+            index + 1,
+            entry.le_player_name,
+            entry.le_mmr,
+            entry.le_wins,
+            entry.le_losses
+        );
+    }
+    Ok(())
+}
 
-    match pos_args.as_slice() {
-        [_, api_key] => {
-            let client = Client::new(api_key.to_string()).expect("Failed to create client");
+#[cfg(test)]
+mod tests {
+    use super::deduplicate_entries;
+    use krunker_rs::LeaderboardResponse;
 
-            // Regions according to documentation:
-            // 2: Asia
-            // 3: Europe
-            // 4: North America
-            let regions = [(2, "Asia"), (3, "Europe"), (4, "North America")];
-            let mut all_entries = Vec::new();
-
-            for (id, name) in regions {
-                match client.get_leaderboard(id, Some(1)).await {
-                    Ok(response) => {
-                        all_entries.extend(response.lr_entries.unwrap_or_default());
-                    }
-                    Err(err) => {
-                        println!("Failed to fetch {} leaderboard: {}", name, err);
-                    }
-                }
-            }
-
-            if all_entries.is_empty() {
-                println!("No leaderboard entries found.");
-                return;
-            }
-
-            // dedup for multiple entries of same player
-            all_entries.sort_by(|a, b| b.le_mmr.cmp(&a.le_mmr));
-            all_entries.dedup_by(|a, b| a.le_player_name == b.le_player_name);
-
-            println!("=== Top 10 Players Overall (By MMR) ===");
-            for (i, entry) in all_entries.iter().take(10).enumerate() {
-                println!(
-                    "{:2}. {:<20} | MMR: {:<5} | Win/Loss: {}/{}",
-                    i + 1,
-                    entry.le_player_name,
-                    entry.le_mmr,
-                    entry.le_wins,
-                    entry.le_losses
-                );
-            }
+    #[test]
+    fn keeps_highest_mmr_when_duplicate_names_are_separated() {
+        let fixture: LeaderboardResponse =
+            serde_json::from_str(include_str!("../tests/fixtures/leaderboard.json")).unwrap();
+        let base = fixture.lr_entries.unwrap().remove(0);
+        let mut entries = Vec::new();
+        for (name, mmr) in [("A", 2300), ("B", 2400), ("A", 2500), ("B", 2200)] {
+            let mut entry = base.clone();
+            entry.le_player_name = name.to_owned();
+            entry.le_mmr = mmr;
+            entries.push(entry);
         }
-        _ => {
-            println!("Usage: cargo run --example global_leaderboard <api-key>");
-        }
+        deduplicate_entries(&mut entries);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            (&*entries[0].le_player_name, entries[0].le_mmr),
+            ("A", 2500)
+        );
+        assert_eq!(
+            (&*entries[1].le_player_name, entries[1].le_mmr),
+            ("B", 2400)
+        );
     }
 }

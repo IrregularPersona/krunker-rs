@@ -1,0 +1,14 @@
+{
+  "map_id": 12345,
+  "name": "MyAwesomeMap",
+  "description": "A fun parkour map",
+  "creator_name": "MapMaker",
+  "votes": 500,
+  "gameplays": 10000,
+  "playtime": 3600000,
+  "category": 5,
+  "created_at": "2023-01-15T10:30:00Z",
+  "updated_at": "2023-06-20T14:00:00Z",
+  "leaderboard_type": "time",
+  "leaderboard_order": 0
+}

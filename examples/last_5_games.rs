@@ -1,66 +1,41 @@
-use krunker_rs::Client;
-use std::env;
+mod common;
 
 #[tokio::main]
-async fn main() {
-    let args: Vec<String> = env::args().collect();
-    let pos_args: Vec<_> = args.iter().filter(|arg| !arg.starts_with("--")).collect();
-
-    match pos_args.as_slice() {
-        [_, api_key, target_player] => {
-            let client = Client::new(api_key.to_string()).expect("Failed to create client");
-
-            match client
-                .get_player_matches(target_player, Some(1), None)
-                .await
-            {
-                Ok(response) => {
-                    println!("=== Last 5 Games for {} ===", target_player);
-                    let pmr_matches = response.pmr_matches.unwrap_or_default();
-                    if pmr_matches.is_empty() {
-                        println!("No matches found.");
-                        return;
-                    }
-
-                    for (i, pmatch) in pmr_matches.iter().take(5).enumerate() {
-                        println!("{}. Match ID: {}", i + 1, pmatch.pm_match_id);
-                        println!("   Date: {}", pmatch.pm_date);
-                        println!("   Score: {}", pmatch.pm_score);
-                        println!(
-                            "   K/D/A: {}/{}/{}",
-                            pmatch.pm_kills, pmatch.pm_deaths, pmatch.pm_assists
-                        );
-                        println!(
-                            "   Result: {}",
-                            if pmatch.pm_victory == 1 {
-                                "Victory"
-                            } else {
-                                "Defeat"
-                            }
-                        );
-                        println!();
-                    }
-
-                    // Dump full data for the most recent game
-                    if let Some(first_match) = pmr_matches.first() {
-                        println!("--- Full Data for Match {} ---", first_match.pm_match_id);
-                        match client.get_match(first_match.pm_match_id).await {
-                            Ok(match_details) => {
-                                println!("{:#?}", match_details);
-                            }
-                            Err(err) => {
-                                println!("Error fetching match details: {}", err);
-                            }
-                        }
-                    }
-                }
-                Err(err) => {
-                    println!("Error fetching matches: {}", err);
-                }
-            }
-        }
-        _ => {
-            println!("Usage: cargo run --example last_5_games <api-key> <player-name>");
-        }
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let (client, args) = common::client_and_args(
+        1,
+        "Usage: cargo run --example last_5_games -- [api-key] <player-name> [--debug]",
+    )?;
+    let matches = client
+        .get_player_matches(&args[0], Some(1), None)
+        .await?
+        .pmr_matches
+        .unwrap_or_default();
+    if matches.is_empty() {
+        println!("No matches found for {}.", args[0]);
+        return Ok(());
     }
+    println!("=== Last 5 Games for {} ===", args[0]);
+    for (index, game) in matches.iter().take(5).enumerate() {
+        println!("{}. Match ID: {}", index + 1, game.pm_match_id);
+        println!("   Date: {}", game.pm_date);
+        println!("   Score: {}", game.pm_score);
+        println!(
+            "   K/D/A: {}/{}/{}",
+            game.pm_kills, game.pm_deaths, game.pm_assists
+        );
+        println!(
+            "   Result: {}\n",
+            if game.pm_victory == 1 {
+                "Victory"
+            } else {
+                "Defeat"
+            }
+        );
+    }
+    if let Some(first) = matches.first() {
+        println!("--- Full Data for Match {} ---", first.pm_match_id);
+        println!("{:#?}", client.get_match(first.pm_match_id).await?);
+    }
+    Ok(())
 }

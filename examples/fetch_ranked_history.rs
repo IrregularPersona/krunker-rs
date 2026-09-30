@@ -1,85 +1,77 @@
-use krunker_rs::Client;
-use std::env;
+mod common;
 
-fn get_kda(kill: i64, death: i64, assist: i64) -> f64 {
-    (kill + assist) as f64 / death as f64
+use krunker_rs::PlayerMatch;
+use std::cmp::Reverse;
+
+fn get_kda(kills: i64, deaths: i64, assists: i64) -> Option<f64> {
+    (deaths > 0).then(|| (kills as f64 + assists as f64) / deaths as f64)
 }
 
-
-fn print_match(pmatch: &krunker_rs::PlayerMatch) {
-    println!("Match id: {}", pmatch.pm_match_id);
-    println!("Date: {}", pmatch.pm_date);
-    println!("Map: {}", pmatch.pm_map);
-    // println!("Duration: {}", format_ms(pmatch.pm_duration as i64 * 1000));
-    println!("Region: {}", pmatch.pm_region);
-    println!("Kills: {}", pmatch.pm_kills);
-    println!("Deaths: {}", pmatch.pm_deaths);
-    println!(
-        "KDA: {:.2}",
-        get_kda(
-            pmatch.pm_kills as i64,
-            pmatch.pm_deaths as i64,
-            pmatch.pm_assists as i64
-        )
-    );
+fn print_match(game: &PlayerMatch) {
+    println!("Match ID: {}", game.pm_match_id);
+    println!("Date: {}", game.pm_date);
+    println!("Map ID: {}", game.pm_map);
+    println!("Duration: {} seconds", game.pm_duration);
+    println!("Region: {}", game.pm_region);
+    println!("Kills: {}", game.pm_kills);
+    println!("Deaths: {}", game.pm_deaths);
+    match get_kda(game.pm_kills, game.pm_deaths, game.pm_assists) {
+        Some(kda) => println!("KDA: {kda:.2}"),
+        None => println!("KDA: N/A (no deaths)"),
+    }
     println!();
 }
 
 #[tokio::main]
-async fn main() {
-    let args: Vec<String> = env::args().collect();
-    let pos_args: Vec<_> = args.iter().filter(|arg| !arg.starts_with("--")).collect();
-
-    match pos_args.as_slice() {
-        [_, api_key, target_player] => {
-            let client = Client::new(api_key.to_string()).expect("Failed to create client");
-
-            let mut all_matches = Vec::new();
-
-            for page in 1..=5 {
-                match client
-                    .get_player_matches(&target_player, Some(page), None)
-                    .await
-                {
-                    Ok(matches) => {
-                        let pmr_matches = matches.pmr_matches.unwrap_or_default();
-                        if pmr_matches.is_empty() {
-                            break;
-                        }
-                        all_matches.extend(pmr_matches);
-                    }
-                    Err(err) => {
-                        println!("Error on page {}: {}", page, err);
-                        break;
-                    }
-                }
-            }
-
-            if all_matches.is_empty() {
-                println!("No matches found for player: {}", target_player);
-                return;
-            }
-
-            println!("Collected {} matches total.", all_matches.len());
-
-            // best 5 recent games
-            let mut best_games: Vec<_> = all_matches.iter().collect();
-            best_games.sort_by(|a, b| b.pm_kills.cmp(&a.pm_kills));
-            println!("\n=== TOP 10 BEST GAMES (HIGHEST KILLS) ===");
-            for pmatch in best_games.iter().take(10) {
-                print_match(pmatch);
-            }
-
-            // worst 5 recent games
-            let mut worst_games: Vec<_> = all_matches.iter().collect();
-            worst_games.sort_by(|a, b| a.pm_kills.cmp(&b.pm_kills));
-            println!("\n=== TOP 5 WORST GAMES (LOWEST KILLS) ===");
-            for pmatch in worst_games.iter().take(5) {
-                print_match(pmatch);
-            }
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let (client, args) = common::client_and_args(
+        1,
+        "Usage: cargo run --example fetch_ranked_history -- [api-key] <player-name> [--debug]",
+    )?;
+    let mut all_matches = Vec::new();
+    for page in 1..=5 {
+        let matches = client
+            .get_player_matches(&args[0], Some(page), None)
+            .await?
+            .pmr_matches
+            .unwrap_or_default();
+        if matches.is_empty() {
+            break;
         }
-        _ => {
-            println!("Usage: cargo run --example fetch_ranked_history <api-key> <player-name>");
-        }
+        all_matches.extend(matches);
+    }
+    if all_matches.is_empty() {
+        println!("No matches found for {}.", args[0]);
+        return Ok(());
+    }
+    println!("Collected {} matches.", all_matches.len());
+    let mut games: Vec<_> = all_matches.iter().collect();
+    games.sort_by_key(|game| Reverse(game.pm_kills));
+    println!("\n=== TOP 10 GAMES BY KILLS ===");
+    for game in games.iter().take(10) {
+        print_match(game);
+    }
+    games.sort_by_key(|game| game.pm_kills);
+    println!("\n=== BOTTOM 5 GAMES BY KILLS ===");
+    for game in games.iter().take(5) {
+        print_match(game);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::get_kda;
+
+    #[test]
+    fn zero_deaths_have_no_ratio() {
+        assert_eq!(get_kda(10, 0, 2), None);
+        assert_eq!(get_kda(0, 0, 0), None);
+        assert_eq!(get_kda(10, 4, 2), Some(3.0));
+    }
+
+    #[test]
+    fn large_counts_do_not_overflow() {
+        assert!(get_kda(i64::MAX, 1, i64::MAX).unwrap().is_finite());
     }
 }

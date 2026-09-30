@@ -1,32 +1,24 @@
-use krunker_rs::Client;
-use std::env;
+mod common;
 
 #[tokio::main]
-async fn main() {
-    let args: Vec<String> = env::args().collect();
-    let pos_args: Vec<_> = args.iter().filter(|arg| !arg.starts_with("--")).collect();
-    match pos_args.as_slice() {
-        [_, api_key, target_player] => {
-            let client = Client::new(api_key.to_string()).expect("Failed to create client");
-
-            match client.get_player_posts(&target_player, Some(1)).await {
-                Ok(content) => {
-                    for post in content.posts_posts.unwrap_or_default() {
-                        println!("Date: {}", post.post_date);
-                        println!("Text: {}", post.post_text);
-                        println!("Votes: {}", post.post_votes);
-                        println!("Comments: {}", post.post_comment_count);
-                        println!();
-                    }
-                }
-                Err(err) => {
-                    println!("Error: {}", err)
-                }
-            }
-        }
-
-        _ => {
-            println!("usage: cargo run --example fetch_post <api-key> <player-name>");
-        }
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let (client, args) = common::client_and_args(
+        1,
+        "Usage: cargo run --example fetch_post -- [api-key] <player-name> [--debug]",
+    )?;
+    let posts = client
+        .get_player_posts(&args[0], Some(1))
+        .await?
+        .posts_posts
+        .unwrap_or_default();
+    if posts.is_empty() {
+        println!("No posts found for {}.", args[0]);
     }
+    for post in posts {
+        println!("Date: {}", post.post_date);
+        println!("Text: {}", post.post_text);
+        println!("Votes: {}", post.post_votes);
+        println!("Comments: {}\n", post.post_comment_count);
+    }
+    Ok(())
 }

@@ -1,806 +1,467 @@
-# Developer APIs
+# Usage guide and API reference
 
-The Developer APIs provide read-only access to public game data for third-party integrations.
+This guide describes the Rust client and its mapping to the Krunker Game API.
+Start with the [README][readme] for installation. Generated documentation for
+all public response fields is available with `cargo doc --no-deps --open`.
 
-## Authentication
+## Contents
 
-All developer API endpoints require the `X-Developer-API-Key` header.
+- [Authentication and runtime](#authentication-and-runtime)
+- [Configuration](#configuration)
+- [Sharing a client](#sharing-a-client)
+- [Endpoint reference](#endpoint-reference)
+- [Pagination](#pagination)
+- [Rate limits and retries](#rate-limits-and-retries)
+- [Errors and diagnostics](#errors-and-diagnostics)
+- [Response fields and units](#response-fields-and-units)
+- [Examples and troubleshooting](#examples-and-troubleshooting)
+- [Testing and compatibility](#testing-and-compatibility)
 
-```
-X-Developer-API-Key: <your-api-key>
-```
+## Authentication and runtime
 
-**Error Response (403 Forbidden):**
-```json
-{
-  "error": "Not allowed."
+All endpoint methods make authenticated, read-only GET requests. The default API
+root is `https://gapi.svc.krunker.io/api`; the client supplies the
+`X-Developer-API-Key` header automatically.
+
+`Client::new` and `ClientBuilder::build` validate configuration without making a
+network request. A syntactically valid key is checked by the server on the first
+endpoint call; HTTP 403 means the server rejected access.
+
+```no_run
+use krunker_rs::Client;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::new(std::env::var("KRUNKER_API_KEY")?)?;
+    let player = client.get_player("Sidney").await?;
+    println!("{} has {} wins", player.player_name, player.player_wins);
+    Ok(())
 }
 ```
 
-## Rate Limiting
+Use a Tokio runtime. The methods return futures: calling one without `.await`
+does not execute a request. There is no synchronous client API.
 
-All endpoints are rate-limited to **60 requests per minute** per API key.
+## Configuration
 
-**Rate Limit Headers:**
+| Builder method | Default | Behavior |
+| --- | --- | --- |
+| `timeout(Duration)` | 30 seconds | Timeout for each attempt, including reading its body |
+| `connect_timeout(Duration)` | 10 seconds | Connection timeout for the default HTTP client |
+| `retry_rate_limits(u32)` | 0 | Maximum additional attempts after HTTP 429 |
+| `base_url(...)` | Production API root | Replaces the root and preserves its path prefix |
+| `http_client(reqwest::Client)` | Created internally | Uses an existing HTTP client's connection, TLS, proxy, and redirect settings |
+| `debug(bool)` | `false` | Enables request metadata on stderr |
 
-Every response includes headers to help you track your usage:
+```no_run
+use krunker_rs::Client;
+use std::time::Duration;
 
-| Header | Description |
-|--------|-------------|
-| `X-RateLimit-Limit` | Maximum requests allowed per window (60) |
-| `X-RateLimit-Remaining` | Requests remaining in the current window |
-| `X-RateLimit-Reset` | Unix timestamp when the rate limit resets |
-
-**Rate Limit Exceeded Response (429 Too Many Requests):**
-```json
-{
-  "error": "Rate limit exceeded",
-  "retry_after": 45
-}
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+let client = Client::builder(std::env::var("KRUNKER_API_KEY")?)
+    .timeout(Duration::from_secs(20))
+    .connect_timeout(Duration::from_secs(5))
+    .retry_rate_limits(2)
+    .build()?;
+# Ok(())
+# }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| error | string | Error message |
-| retry_after | int | Seconds until the rate limit resets |
+Timeouts must be greater than zero. The request timeout still applies when you
+inject an HTTP client; the injected client controls its own connection timeout.
+Add `reqwest = "0.12"` to your application's dependencies to configure one:
 
----
+```no_run
+use krunker_rs::Client;
+use std::time::Duration;
 
-## Player Endpoints
-
-### Get Player Profile
-
-Retrieve comprehensive player statistics and profile information.
-
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+let http = reqwest::Client::builder()
+    .connect_timeout(Duration::from_secs(5))
+    .build()?;
+let client = Client::builder(std::env::var("KRUNKER_API_KEY")?)
+    .http_client(http)
+    .timeout(Duration::from_secs(20))
+    .build()?;
+# Ok(())
+# }
 ```
-GET /api/player/:playername
+
+The default HTTP client does not follow redirects. A 3xx response becomes
+`Error::Api`. An injected HTTP client keeps its configured redirect policy.
+
+For a mock server or a proxy, set the full root, including `/api` if needed:
+
+```no_run
+use krunker_rs::Client;
+
+# fn main() -> krunker_rs::Result<()> {
+let client = Client::builder("test-key")
+    .base_url("http://127.0.0.1:8080/api/")
+    .build()?;
+# Ok(())
+# }
 ```
 
-**Parameters:**
-| Name | Type | Location | Required | Description |
-|------|------|----------|----------|-------------|
-| playername | string | path | yes | The player's in-game username |
+HTTP and HTTPS roots are accepted with or without a trailing slash. Roots cannot
+contain credentials, a query string, or a fragment.
 
-**Response:**
-```json
-{
-  "player_name": "string",
-  "clan": "string",
-  "verified": true,
-  "flag": 5,
-  "badges": [1, 2, 3],
-  "following": 50,
-  "followers": 100,
-  "ranked": [
-    {
-      "region": 0,
-      "mmr": 2250,
-      "wins": 45,
-      "losses": 30,
-      "kills": 800,
-      "deaths": 500,
-      "assists": 200,
-      "score": 15000,
-      "damage_done": 120000,
-      "time_played": 36000
+## Sharing a client
+
+Cloning a client is inexpensive. Its clones share one HTTP connection pool,
+debug flag, and rate limit snapshot. A new independently constructed client gets
+its own pool and state. There is no process-wide singleton.
+
+```no_run
+use krunker_rs::Client;
+
+# async fn example(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
+let worker = client.clone();
+let task = tokio::spawn(async move { worker.get_player("Sidney").await });
+let posts = client.get_player_posts("IshaqAyubi", Some(1)).await?;
+let player = task.await??;
+println!("{}; {} posts", player.player_name, posts.posts_posts.unwrap_or_default().len());
+# Ok(())
+# }
+```
+
+Concurrent calls can consume the same API key's quota. The cached rate limit is
+the last response processed, not a reservation or a guaranteed ordering of
+server-side requests.
+
+## Endpoint reference
+
+Every method returns `krunker_rs::Result<T>` and must be awaited. Paths below are
+relative to the configured root, which already includes `/api` by default.
+
+| Rust method | GET path | Response type | Parameters and behavior |
+| --- | --- | --- | --- |
+| `get_player(name: &str)` | `/player/{name}` | `Player` | Profile, lifetime statistics, and current ranked profiles |
+| `get_player_inventory(name: &str)` | `/player/{name}/inventory` | `Vec<InventoryItem>` | Owned skin quantities; excludes market listings |
+| `get_player_matches(name: &str, page: Option<i32>, season: Option<i32>)` | `/player/{name}/matches` | `PlayerMatchesResponse` | Ranked matches, newest first; no season filter when `season` is `None` |
+| `get_player_posts(name: &str, page: Option<i32>)` | `/player/{name}/posts` | `PostsResponse` | A page of social posts |
+| `get_match(match_id: i64)` | `/match/{match_id}` | `Match` | Ranked match details; participants ordered by team, then score |
+| `get_clan(name: &str)` | `/clan/{name}` | `Clan` | Public clan profile |
+| `get_clan_members(name: &str, page: Option<i32>)` | `/clan/{name}/members` | `ClanMembersResponse` | Members ordered by role, then score |
+| `get_leaderboard(region: i32, page: Option<i32>)` | `/leaderboard/{region}` | `LeaderboardResponse` | Current ranked season; entries ordered by MMR, highest first |
+| `get_map(name: &str)` | `/map/{name}` | `GameMap` | Case-sensitive map name; restricted or deleted maps can return 404 |
+| `get_map_leaderboard(name: &str, page: Option<i32>)` | `/map/{name}/leaderboard` | `MapLeaderboardResponse` | Case-sensitive; empty entries when no leaderboard is configured |
+| `get_mods(page: Option<i32>)` | `/mods` | `ModsResponse` | Active mods sorted by votes; deleted mods and banned creators excluded |
+| `get_mod(name: &str)` | `/mods/{name}` | `Mod` | One mod's details |
+| `get_market_skin(skin_index: i32, page: Option<i32>)` | `/market/skin/{skin_index}` | `MarketResponse` | Listing pagination, top owners, and daily price history |
+
+### Names and input validation
+
+Pass names exactly as they appear in the game, without URL encoding. Spaces,
+Unicode, `#`, `?`, `%`, and `/` are encoded as part of a single path segment.
+For example, `"Arena #1"` is sent as `Arena%20%231`; passing `"Arena%20%231"`
+instead looks up a name containing those literal percent sequences.
+
+The client rejects these inputs before sending a request:
+
+- Empty or whitespace-only names, literal `.` or `..`, and control characters.
+- Page numbers below 1.
+- Negative season, region, or skin index values.
+- Match IDs of zero or less.
+- Empty API keys or keys that cannot be represented as an HTTP header.
+
+Other names and IDs are validated by the API and can produce `Error::Api`.
+
+### Ranked region IDs
+
+| Region | Request ID |
+| --- | --- |
+| Asia | 2 |
+| Europe | 3 |
+| North America | 4 |
+
+Other nonnegative IDs are forwarded to the API for compatibility with new
+regions. Treat region fields in returned player and match data as API values;
+the client does not translate or normalize them.
+
+## Pagination
+
+`None` omits the `page` query parameter; the API currently defaults to page 1.
+Pass `Some(2)` for page 2. Page sizes are controlled by the server, not the client.
+Use a returned `per_page` field when available. Typical page sizes are 10 for
+ranked history, clan members, ranked leaderboards, mods, and market listings;
+map leaderboards typically use 25.
+
+Collections use `Option<Vec<T>>`. An absent or JSON-null collection becomes
+`None`; an empty array becomes `Some(vec![])`. Use `unwrap_or_default()` when
+both should behave like an empty list.
+
+This example fetches at most ten pages of ranked history and stops at an empty
+page:
+
+```no_run
+use krunker_rs::{Client, PlayerMatch};
+
+# async fn example(client: &Client) -> krunker_rs::Result<Vec<PlayerMatch>> {
+let mut games = Vec::new();
+for page in 1..=10 {
+    let response = client.get_player_matches("IshaqAyubi", Some(page), None).await?;
+    let batch = response.pmr_matches.unwrap_or_default();
+    if batch.is_empty() {
+        break;
     }
-  ],
-  "kr": 1000,
-  "level": 50,
-  "junk": 1500.5,
-  "inventory": 25000,
-  "score": 1000000,
-  "spk": 125.5,
-  "kills": 8000,
-  "deaths": 4000,
-  "kdr": 2.0,
-  "kpg": 10.5,
-  "games": 760,
-  "wins": 400,
-  "losses": 360,
-  "assists": 1200,
-  "melees": 150,
-  "beatdowns": 50,
-  "bullseyes": 30,
-  "headshots": 3000,
-  "legshots": 500,
-  "wallbangs": 200,
-  "shots": 100000,
-  "hits": 45000,
-  "misses": 55000,
-  "time_played": 360000,
-  "nukes": 25,
-  "airdrops": 150,
-  "airdrops_stolen": 30,
-  "slimes": 40,
-  "juggernauts": 20,
-  "juggernauts_killed": 15,
-  "warmachines": 10,
-  "hacker_tagged": false,
-  "created_at": "2021-05-10T14:30:00Z"
+    games.extend(batch);
 }
+# Ok(games)
+# }
 ```
 
-**Response Fields:**
-| Field | Type | Description |
-|-------|------|-------------|
-| player_name | string | Player's username |
-| clan | string | Player's clan name (empty string if not in a clan) |
-| verified | bool | Whether the player is verified |
-| flag | int | Player's country flag index |
-| badges | int[] | Array of badge IDs the player has earned |
-| following | int | Number of players this player is following |
-| followers | int | Number of players following this player |
-| ranked | object[] | Array of ranked profiles for the current season, one per region (only includes regions where player has completed 6+ placement matches) |
-| ranked[].region | int | Region ID |
-| ranked[].mmr | int | Matchmaking rating |
-| ranked[].wins | int | Ranked wins in this region |
-| ranked[].losses | int | Ranked losses in this region |
-| ranked[].kills | int | Total kills in ranked matches |
-| ranked[].deaths | int | Total deaths in ranked matches |
-| ranked[].assists | int | Total assists in ranked matches |
-| ranked[].score | int | Total score in ranked matches |
-| ranked[].damage_done | int | Total damage dealt in ranked matches |
-| ranked[].time_played | int | Total time played in ranked matches (seconds) |
-| kr | int | Currency balance |
-| level | int | Calculated from score (0.03 × √score, min 1) |
-| junk | float | ELO/Junk rating |
-| inventory | int | Total skin value |
-| score | int | Total score |
-| spk | float | Score per kill |
-| kills | int | Total kills |
-| deaths | int | Total deaths |
-| kdr | float | Kill/Death ratio |
-| kpg | float | Kills per game |
-| games | int | Games played |
-| wins | int | Games won |
-| losses | int | Games lost (games - wins) |
-| assists | int | Total assists |
-| melees | int | Melee kills |
-| beatdowns | int | Fist kills |
-| bullseyes | int | Thrown weapon kills |
-| headshots | int | Headshot kills |
-| legshots | int | Leg shot kills |
-| wallbangs | int | Wallbang kills |
-| shots | int | Total shots fired |
-| hits | int | Shots that connected |
-| misses | int | Shots missed (shots - hits) |
-| time_played | int64 | Seconds played |
-| nukes | int | Nukes called in |
-| airdrops | int | Airdrops called in |
-| airdrops_stolen | int | Airdrops stolen from enemies |
-| slimes | int | Slimes called in |
-| juggernauts | int | Juggernaut killstreaks earned |
-| juggernauts_killed | int | Enemy juggernauts killed |
-| warmachines | int | Warmachines called in |
-| hacker_tagged | bool | Whether the player has been flagged as a cheater |
-| created_at | string | Account creation date (RFC3339 format) |
+Market `page` applies only to `mr_listings`. The API also returns up to 100 owners
+and price history independently of the listing page. There is no automatic
+pagination or response cache in the client.
 
----
+## Rate limits and retries
 
-### Get Player Inventory
+API limits apply per key and can vary. Use the actual response headers instead
+of hardcoding a request count or window length:
 
-Retrieve a player's skin inventory.
+| Header | Rust field | Meaning |
+| --- | --- | --- |
+| `X-RateLimit-Limit` | `RateLimitInfo::limit` | Maximum requests in the current window |
+| `X-RateLimit-Remaining` | `RateLimitInfo::remaining` | Requests remaining when the response was generated |
+| `X-RateLimit-Reset` | `RateLimitInfo::reset` | Window reset time as Unix seconds |
 
-```
-GET /api/player/:playername/inventory
+```no_run
+use krunker_rs::Client;
+
+# async fn example(client: &Client) {
+if let Some(limit) = client.last_rate_limit().await {
+    println!("Remaining: {}/{}; reset: {}", limit.remaining, limit.limit, limit.reset);
+}
+# }
 ```
 
-**Parameters:**
-| Name | Type | Location | Required | Description |
-|------|------|----------|----------|-------------|
-| playername | string | path | yes | The player's in-game username |
+The snapshot is `None` before a response or if the most recently processed
+response lacks a complete, valid set of headers. It is shared by clones.
 
-**Response:**
+Every HTTP 429 is returned as `Error::RateLimit`, including non-JSON responses
+from a proxy. The recommended delay is selected in this order:
+
+1. Nonnegative JSON `retry_after`, in seconds.
+2. The `Retry-After` header, as seconds or an HTTP date.
+3. Time until `X-RateLimit-Reset`, rounded up to a whole second.
+4. One second when no usable delay is supplied.
+
+Example server response:
+
 ```json
-[
-  {
-    "skin_index": 123,
-    "count": 5
-  }
-]
+{"error":"Rate limit exceeded","retry_after":45}
 ```
 
-**Response Fields:**
-| Field | Type | Description |
-|-------|------|-------------|
-| skin_index | int | Identifier for the skin |
-| count | int | Number owned (excludes market listings) |
+`retry_rate_limits(2)` allows at most three attempts: the original request and
+two retries. Retries wait for the recommended delay and apply only to 429s.
+Other HTTP statuses, transport errors, and decode failures are returned immediately.
+The client does not proactively throttle concurrent requests.
 
----
+The per-attempt timeout excludes the delay between retries. Apply an outer
+timeout when your application needs a total budget:
 
-### Get Player Match History
+```no_run
+use krunker_rs::Client;
+use std::time::Duration;
 
-Retrieve a player's ranked match history (paginated).
-
+# async fn example(client: &Client) -> Result<(), Box<dyn std::error::Error>> {
+let player = tokio::time::timeout(
+    Duration::from_secs(60),
+    client.get_player("Sidney"),
+).await??;
+println!("{}", player.player_name);
+# Ok(())
+# }
 ```
-GET /api/player/:playername/matches
-```
 
-**Parameters:**
-| Name | Type | Location | Required | Description |
-|------|------|----------|----------|-------------|
-| playername | string | path | yes | The player's in-game username |
-| page | int | query | no | Page number (default: 1) |
-| season | int | query | no | Season filter (default: all seasons) |
+## Errors and diagnostics
 
-**Response:**
-```json
-{
-  "page": 1,
-  "per_page": 10,
-  "matches": [
-    {
-      "match_id": 123456789,
-      "date": "2024-01-15T10:30:00Z",
-      "map": 5,
-      "duration": 600,
-      "season": 12,
-      "region": 1,
-      "kills": 15,
-      "deaths": 8,
-      "assists": 3,
-      "score": 1500,
-      "damage_done": 2500,
-      "headshots": 5,
-      "accuracy": 35,
-      "objective_score": 200,
-      "kr": 50,
-      "victory": 1,
-      "rounds_won": 6,
-      "team": 1,
-      "play_time": 580
+| Error variant | Meaning | Useful next step |
+| --- | --- | --- |
+| `InvalidInput { parameter, message }` | Local configuration or parameter validation failed | Correct the input; no request was sent |
+| `Http(reqwest::Error)` | Transport, TLS, timeout, or response body read failure | Inspect `is_timeout()` / `is_connect()` and the error source |
+| `Api { status, message }` | Non-success status other than 429 | Inspect the HTTP status and API message |
+| `RateLimit { retry_after }` | HTTP 429 after any configured retries | Wait or reduce request volume |
+| `Decode { message, body, field }` | A 2xx body did not match the response type or was not complete JSON | Inspect the JSON field path and explicitly inspect the body |
+
+Typical API statuses are 400 for invalid server-side parameters, 403 for rejected
+access, 404 for missing resources, 429 for rate limits, and 500 for server errors.
+The library also retains other non-success statuses, including 3xx responses
+when redirects are disabled.
+
+```no_run
+use krunker_rs::{Client, Error};
+
+# async fn example(client: &Client) {
+match client.get_player("Sidney").await {
+    Ok(player) => println!("{}", player.player_name),
+    Err(Error::Api { status, message }) => eprintln!("API status {status}: {message}"),
+    Err(Error::Decode { message, field, body }) => {
+        eprintln!("Cannot decode {field:?}: {message}; received {} bytes", body.len());
     }
-  ]
+    Err(Error::InvalidInput { parameter, message }) => eprintln!("{parameter}: {message}"),
+    Err(Error::RateLimit { retry_after }) => eprintln!("Retry in {retry_after}s"),
+    Err(Error::Http(error)) => eprintln!("Transport error: {error}"),
 }
+# }
 ```
 
-**Notes:**
-- Only ranked matches are returned
-- Page size is fixed at 10 records
-- Matches are ordered by date descending
+Unknown JSON object fields are accepted for API compatibility. Missing required
+fields, wrong types, malformed JSON, and non-whitespace trailing data produce a
+decode error. `field` contains a JSON path, such as `matches[0].kills`; trailing
+data has no field path.
 
----
+`Error::source()` exposes a wrapped Reqwest error. Body transport failures remain
+`Error::Http` even when the server returned an error status. API errors keep the
+full message, but display at most 512 characters. Decode error display omits the
+response body; that body remains available in the variant.
 
-### Get Player Posts
+`client.set_debug(true)` changes debugging for that client and its clones. Logs
+go to stderr and include the URL, status, body size, and retry delay. They do not
+print the API key or the response body.
 
-Retrieve a player's social media posts (paginated).
+## Response fields and units
 
-```
-GET /api/player/:playername/posts
-```
+All public models derive `Debug`, `Clone`, `Serialize`, and `Deserialize`. Existing
+Rust field prefixes are retained. Serde maps them to the API's original JSON
+keys, so serialized JSON uses `kills`, not a Rust field such as `pm_kills`.
 
-**Parameters:**
-| Name | Type | Location | Required | Description |
-|------|------|----------|----------|-------------|
-| playername | string | path | yes | The player's in-game username |
-| page | int | query | no | Page number (default: 1) |
+| Model | Rust field prefix | Contains |
+| --- | --- | --- |
+| `Player` | `player_` | Identity, clan, badges, ranked profiles, currency, level, and lifetime counters |
+| `RankedProfile` | `ranked_` | Region, MMR, wins, losses, combat totals, score, and time played |
+| `InventoryItem` | `inventory_` | Skin index and owned quantity |
+| `PlayerMatchesResponse` | `pmr_` | Page, page size, and optional `Vec<PlayerMatch>` |
+| `PlayerMatch` | `pm_` | Match ID, date, map, region, season, combat statistics, and result |
+| `PostsResponse` | `posts_` | Page, page size, and optional `Vec<Post>` |
+| `Post` | `post_` | Date, text, votes, and comment count |
+| `Match` | `match_` | Match ID, date, map, duration, season, region, and participants |
+| `MatchParticipant` | `mp_` | Player name and statistics within one ranked match |
+| `Clan` | `clan_` | Name, owner, score, rank, size, creation time, and Discord invite code |
+| `ClanMembersResponse` | `cmr_` | Page, page size, and optional `Vec<ClanMember>` |
+| `ClanMember` | `cm_` | Player name and numeric role |
+| `LeaderboardResponse` | `lr_` | Page, page size, current season, region, and entries |
+| `LeaderboardEntry` | `le_` | Regional position, player, MMR, and ranked statistics |
+| `GameMap` | `gm_` | Map identity, creator, activity, category, timestamps, and leaderboard settings |
+| `MapLeaderboardResponse` | `mlr_` | Page, page size, map name, leaderboard settings, and entries |
+| `MapLeaderboardEntry` | `mle_` | Position, player, score or time value, and recorded date |
+| `ModsResponse` | `mods_` | Page, page size, and optional `Vec<Mod>` |
+| `Mod` | `mod_` | Identity, creator, votes, featured flag, version, and timestamps |
+| `MarketResponse` | `mr_` | Skin, listing count, pricing, circulation, listings, owners, and history |
+| `MarketListing` | `ml_` | Integer KR price, seller, and listing timestamp |
+| `MarketOwner` | `mo_` | Player name and owned quantity |
+| `PriceHistory` | `ph_` | Day, average sale price, and sales count |
+| `RateLimitInfo` | None | Limit, remaining requests, and reset timestamp |
+| `RateLimitResponse` | None | JSON error text and retry delay |
+| `GenericErrorResponse` | None | JSON error text |
 
-**Response:**
-```json
-{
-  "page": 1,
-  "per_page": 10,
-  "posts": [
-    {
-      "date": "2024-01-15T10:30:00Z",
-      "text": "Just hit level 100!",
-      "votes": 42,
-      "comment_count": 5
-    }
-  ]
-}
-```
+Each field's Rust type, JSON key, and meaning is documented in the generated
+API reference. Representative JSON payloads are kept in
+[`tests/fixtures`](https://github.com/IrregularPersona/krunker-rs/tree/HEAD/tests/fixtures)
+and checked against these public models.
 
----
+### Time, counters, and special values
 
-## Match Endpoints
+| Fields | Representation and unit |
+| --- | --- |
+| `player_time_played`, `ranked_time_played` | Integer seconds |
+| `pm_duration`, `pm_play_time`, `match_duration` | Integer seconds |
+| `gm_playtime` | Integer milliseconds |
+| Creation, update, listing, post, and match dates | API timestamp strings, normally RFC3339 |
+| `ph_date` | Calendar date string in `YYYY-MM-DD` form |
+| `RateLimitInfo::reset` | Unix timestamp in seconds |
+| `Error::RateLimit::retry_after` | Delay in seconds |
+| KR balances and listing prices | Integer KR amounts |
+| Market and historical average prices | Floating-point KR amounts |
+| `pm_accuracy`, `mp_accuracy` | Integer percentage values |
+| `pm_victory` | Numeric result; 1 indicates victory |
+| `gm_leaderboard_order`, `mlr_leaderboard_order` | 0 = ascending, 1 = descending |
+| `gm_leaderboard_type`, `mlr_leaderboard_type` | API value such as `"time"` or `"score"`; a map can have an empty type |
 
-### Get Match Details
+Timestamps remain strings so callers can choose their date library. Do not treat
+map playtime as seconds or infer a map leaderboard value's unit without checking
+its type. IDs, roles, flags, and categories remain numeric API values.
 
-Retrieve detailed information about a specific ranked match.
+A player's clan name can be empty when they have no clan. A clan's Discord code
+can be empty when unset. Ranked profiles include regions where the player has
+completed the required placement matches. The API controls placement thresholds.
+Player history and match details cover ranked games, not all public matches.
 
-```
-GET /api/match/:id
-```
+Market listings are ordered by price, lowest first. `mr_lowest_price` is zero
+when there are no listings. `mr_average_price` reflects recent sales, typically
+the last seven days. Owners are ordered by quantity, highest first, and history
+contains daily averages for days with sales, typically within the last 30 days.
 
-**Parameters:**
-| Name | Type | Location | Required | Description |
-|------|------|----------|----------|-------------|
-| id | int64 | path | yes | The match ID |
+## Examples and troubleshooting
 
-**Response:**
-```json
-{
-  "match_id": 123456789,
-  "date": "2024-01-15T10:30:00Z",
-  "map": 5,
-  "duration": 600,
-  "season": 12,
-  "region": 1,
-  "participants": [
-    {
-      "player_name": "Player1",
-      "kills": 15,
-      "deaths": 8,
-      "assists": 3,
-      "score": 1500,
-      "damage_done": 2500,
-      "headshots": 5,
-      "accuracy": 35,
-      "objective_score": 200,
-      "victory": 1,
-      "rounds_won": 6,
-      "team": 1,
-      "play_time": 580
-    }
-  ]
-}
-```
+All example commands accept an environment key or a first positional API key.
+A positional key takes precedence when supplied. These commands assume
+`KRUNKER_API_KEY` is already set:
 
-**Notes:**
-- Only ranked matches are returned
-- Participants are ordered by team, then by score descending
+| Command | Output |
+| --- | --- |
+| `cargo run --example fetch_player -- Sidney` | Profile and rate limit snapshot |
+| `cargo run --example fetch_post -- IshaqAyubi` | First page of posts |
+| `cargo run --example last_5_games -- IshaqAyubi` | Five recent ranked matches and details for the newest one |
+| `cargo run --example fetch_ranked_history -- IshaqAyubi` | Up to five history pages, then games ranked by kills |
+| `cargo run --example global_leaderboard` | Ten unique players with their highest regional MMR |
+| `cargo run --example ishaq_posts` | First page of IshaqAyubi's posts |
 
----
+Append `--debug` for request metadata. Names containing spaces should be quoted.
+Examples return a nonzero exit code on API errors or invalid command-line input.
+KDA is displayed as `N/A` when there are no deaths.
 
-## Clan Endpoints
+| Symptom | Check |
+| --- | --- |
+| Compiler expects a future instead of a result | Make the caller async and add `.await` |
+| No Tokio runtime available | Use `#[tokio::main]` or run the future inside your existing Tokio runtime |
+| HTTP 403 | Check the supplied developer key and its access |
+| HTTP 404 | Check spelling, map case, and whether the resource is public or still exists |
+| HTTP 429 | Respect the reported delay, reduce concurrency, or enable bounded rate limit retries |
+| Transport timeout | Retry deliberately or increase the configured timeout for a slow endpoint |
+| Decode error | Inspect the field path and body; the server may have changed its schema |
+| Empty history or leaderboard | The player may lack ranked games or placements in that region |
 
-### Get Clan Profile
+## Testing and compatibility
 
-Retrieve a clan's public information.
+Local tests require no developer key. They use synthetic JSON fixtures and mock
+HTTP servers to check routes, encoding, query parameters, errors, timeouts,
+retries, and rate limit state. Documentation snippets compile without making
+network requests.
 
-```
-GET /api/clan/:clanname
-```
-
-**Parameters:**
-| Name | Type | Location | Required | Description |
-|------|------|----------|----------|-------------|
-| clanname | string | path | yes | The clan's name |
-
-**Response:**
-```json
-{
-  "name": "Elite Squad",
-  "owner_name": "ClanLeader",
-  "score": 5000000,
-  "rank": 15,
-  "member_count": 25,
-  "created_at": "2023-06-01T00:00:00Z",
-  "discord": "abc123xyz"
-}
-```
-
-**Response Fields:**
-| Field | Type | Description |
-|-------|------|-------------|
-| name | string | Clan name |
-| owner_name | string | Name of the clan owner |
-| score | int64 | Clan's total score |
-| rank | int | Clan's leaderboard rank |
-| member_count | int | Number of members in the clan |
-| created_at | string | Clan creation date |
-| discord | string | Discord invite code (empty string if not set) |
-
----
-
-### Get Clan Members
-
-Retrieve a clan's member list (paginated).
-
-```
-GET /api/clan/:clanname/members
+```bash
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
+cargo test --locked --doc
+cargo doc --locked --no-deps
 ```
 
-**Parameters:**
-| Name | Type | Location | Required | Description |
-|------|------|----------|----------|-------------|
-| clanname | string | path | yes | The clan's name |
-| page | int | query | no | Page number (default: 1) |
+To check the live service explicitly with `KRUNKER_API_KEY` set:
 
-**Response:**
-```json
-{
-  "page": 1,
-  "per_page": 10,
-  "members": [
-    {
-      "player_name": "ClanLeader",
-      "role": 3
-    },
-    {
-      "player_name": "Member1",
-      "role": 1
-    }
-  ]
-}
+```bash
+cargo test --locked --test live_api -- --ignored --nocapture
 ```
 
-**Notes:**
-- Page size is fixed at 10 records
-- Members are sorted by role (descending), then by score (descending)
+The live test uses `KRUNKER_PLAYER` (default `IshaqAyubi`) and `KRUNKER_MAP`
+(default `Burg`). Mod details, match details, and clan calls depend on returned
+data being available. The market skin is selected from the player's inventory,
+with a fallback index of 3973. Live tests are ignored by default and in CI.
 
----
+Existing endpoint signatures and response field names are preserved. Changes
+to account for when updating from the earlier implementation:
 
-## Leaderboard Endpoints
+- Requests now have a finite default timeout.
+- Names must be passed without percent encoding.
+- Invalid local parameters return the new `Error::InvalidInput` variant; add
+  that case to any exhaustive matches on `Error`.
+- Malformed success responses with trailing data are rejected.
+- Debugging logs metadata rather than raw response bodies.
+- Missing rate limit headers clear the previous snapshot.
+- The default HTTP client returns redirects as status errors.
 
-### Get Ranked Leaderboard
+The repository declares Rust 1.85 as its minimum version and is licensed under
+[MIT](https://opensource.org/licenses/MIT); see `LICENSE` for the full text.
 
-Retrieve the ranked leaderboard for a specific region.
-
-```
-GET /api/leaderboard/:region
-```
-
-**Parameters:**
-| Name | Type | Location | Required | Description |
-|------|------|----------|----------|-------------|
-| region | int | path | yes | The region ID (2 = Asia, 3 = Europe, 4 = North America) |
-| page | int | query | no | Page number (default: 1) |
-
-**Response:**
-```json
-{
-  "page": 1,
-  "per_page": 10,
-  "season": 5,
-  "region": 0,
-  "entries": [
-    {
-      "position": 1,
-      "player_name": "TopPlayer",
-      "mmr": 2500,
-      "wins": 150,
-      "losses": 50,
-      "kills": 3000,
-      "deaths": 1500,
-      "assists": 800,
-      "score": 50000,
-      "damage_done": 450000
-    }
-  ]
-}
-```
-
-**Response Fields:**
-| Field | Type | Description |
-|-------|------|-------------|
-| page | int | Current page number |
-| per_page | int | Number of entries per page (10) |
-| season | int | Current ranked season |
-| region | int | Region ID |
-| entries | object[] | Array of leaderboard entries |
-| entries[].position | int | Leaderboard position |
-| entries[].player_name | string | Player's username |
-| entries[].mmr | int | Matchmaking rating |
-| entries[].wins | int | Total ranked wins |
-| entries[].losses | int | Total ranked losses |
-| entries[].kills | int | Total kills in ranked matches |
-| entries[].deaths | int | Total deaths in ranked matches |
-| entries[].assists | int | Total assists in ranked matches |
-| entries[].score | int | Total score in ranked matches |
-| entries[].damage_done | int | Total damage dealt in ranked matches |
-
-**Notes:**
-- Only players with 6+ completed placement matches appear on the leaderboard
-- Page size is fixed at 10 records
-- Entries are sorted by MMR descending
-
----
-
-## Map Endpoints
-
-### Get Map by Name
-
-Retrieve map information by its name.
-
-```
-GET /api/map/:mapname
-```
-
-**Parameters:**
-| Name | Type | Location | Required | Description |
-|------|------|----------|----------|-------------|
-| mapname | string | path | yes | The map's name (URL encoded) |
-
-**Response:**
-```json
-{
-  "map_id": 12345,
-  "name": "MyAwesomeMap",
-  "description": "A fun parkour map",
-  "creator_name": "MapMaker",
-  "votes": 500,
-  "gameplays": 10000,
-  "playtime": 3600000,
-  "category": 5,
-  "created_at": "2023-01-15T10:30:00Z",
-  "updated_at": "2023-06-20T14:00:00Z",
-  "leaderboard_type": "time",
-  "leaderboard_order": 0
-}
-```
-
-**Response Fields:**
-| Field | Type | Description |
-|-------|------|-------------|
-| map_id | int | Unique map identifier |
-| name | string | Map name |
-| description | string | Map description |
-| creator_name | string | Username of the map creator |
-| votes | int | Total upvotes |
-| gameplays | int | Number of times the map has been played |
-| playtime | int64 | Total playtime in milliseconds |
-| category | int | Map category ID |
-| created_at | string | When the map was created |
-| updated_at | string | When the map was last updated |
-| leaderboard_type | string | Type of leaderboard (e.g., "time", "score", empty if none) |
-| leaderboard_order | int | Sort order for leaderboard (0 = ascending/lower is better, 1 = descending/higher is better) |
-
-**Notes:**
-- Returns 404 if map not found or is restricted/deleted
-- Map name is case-sensitive
-
----
-
-### Get Map Leaderboard
-
-Retrieve the leaderboard for a specific map (paginated).
-
-```
-GET /api/map/:mapname/leaderboard
-```
-
-**Parameters:**
-| Name | Type | Location | Required | Description |
-|------|------|----------|----------|-------------|
-| mapname | string | path | yes | The map's name (URL encoded) |
-| page | int | query | no | Page number (default: 1) |
-
-**Response:**
-```json
-{
-  "page": 1,
-  "per_page": 25,
-  "map_name": "MyAwesomeMap",
-  "leaderboard_type": "time",
-  "leaderboard_order": 0,
-  "entries": [
-    {
-      "position": 1,
-      "player_name": "SpeedRunner",
-      "value": 12345,
-      "date": "2024-01-15T10:30:00Z"
-    }
-  ]
-}
-```
-
-**Response Fields:**
-| Field | Type | Description |
-|-------|------|-------------|
-| page | int | Current page number |
-| per_page | int | Number of entries per page (25) |
-| map_name | string | The map name queried |
-| leaderboard_type | string | Type of leaderboard (e.g., "time", "score") |
-| leaderboard_order | int | Sort order (0 = ascending, 1 = descending) |
-| entries | object[] | Array of leaderboard entries |
-| entries[].position | int | Leaderboard position |
-| entries[].player_name | string | Player's username |
-| entries[].value | int | Score or time value |
-| entries[].date | string | When the entry was recorded |
-
-**Notes:**
-- Returns empty entries array if the map has no leaderboard configured
-- Page size is fixed at 25 records
-- Entries are sorted by value according to leaderboard_order
-
----
-
-## Mod Endpoints
-
-### Get Mods
-
-Retrieve a paginated list of mods, sorted by votes (most popular first).
-
-```
-GET /api/mods
-```
-
-**Parameters:**
-| Name | Type | Location | Required | Description |
-|------|------|----------|----------|-------------|
-| page | int | query | no | Page number (default: 1) |
-
-**Response:**
-```json
-{
-  "page": 1,
-  "per_page": 10,
-  "mods": [
-    {
-      "mod_id": 12345,
-      "name": "AwesomeMod",
-      "description": "A cool mod that changes textures",
-      "creator_name": "ModCreator",
-      "votes": 5000,
-      "featured": true,
-      "version": 15,
-      "created_at": "2023-01-15T10:30:00Z",
-      "updated_at": "2024-06-20T14:00:00Z"
-    }
-  ]
-}
-```
-
-**Response Fields:**
-| Field | Type | Description |
-|-------|------|-------------|
-| page | int | Current page number |
-| per_page | int | Number of mods per page (10) |
-| mods | object[] | Array of mod objects |
-| mods[].mod_id | int | Unique mod identifier |
-| mods[].name | string | Mod name |
-| mods[].description | string | Mod description |
-| mods[].creator_name | string | Username of the mod creator |
-| mods[].votes | int | Number of upvotes |
-| mods[].featured | bool | Whether the mod is featured |
-| mods[].version | int | Mod version number |
-| mods[].created_at | string | When the mod was first published |
-| mods[].updated_at | string | When the mod was last updated |
-
-**Notes:**
-- Mods are sorted by votes (most popular first)
-- Only active mods are returned (deleted mods are excluded)
-- Mods from banned users are excluded
-
----
-
-### Get Mod by Name
-
-Retrieve detailed information about a specific mod.
-
-```
-GET /api/mods/:modname
-```
-
-**Parameters:**
-| Name | Type | Location | Required | Description |
-|------|------|----------|----------|-------------|
-| modname | string | path | yes | The mod's name (URL encoded) |
-
-**Response:**
-```json
-{
-  "mod_id": 12345,
-  "name": "AwesomeMod",
-  "description": "A cool mod that changes textures",
-  "creator_name": "ModCreator",
-  "votes": 5000,
-  "featured": true,
-  "version": 15,
-  "created_at": "2023-01-15T10:30:00Z",
-  "updated_at": "2024-06-20T14:00:00Z"
-}
-```
-
-**Response Fields:**
-| Field | Type | Description |
-|-------|------|-------------|
-| mod_id | int | Unique mod identifier |
-| name | string | Mod name |
-| description | string | Mod description |
-| creator_name | string | Username of the mod creator |
-| votes | int | Number of upvotes |
-| featured | bool | Whether the mod is featured |
-| version | int | Mod version number |
-| created_at | string | When the mod was first published |
-| updated_at | string | When the mod was last updated |
-
----
-
-## Market Endpoints
-
-### Get Market Listings by Skin Index
-
-Retrieve market information and active listings for a specific skin.
-
-```
-GET /api/market/skin/:skinindex
-```
-
-**Parameters:**
-| Name | Type | Location | Required | Description |
-|------|------|----------|----------|-------------|
-| skinindex | int | path | yes | The skin index (item type ID) |
-| page | int | query | no | Page number for listings (default: 1) |
-
-**Response:**
-```json
-{
-  "skin_index": 123,
-  "total_listings": 45,
-  "lowest_price": 500,
-  "average_price": 750.5,
-  "total_circulating": 3500,
-  "listings": [
-    {
-      "price": 500,
-      "seller_name": "Player1",
-      "listed_at": "2025-01-15T10:30:00Z"
-    }
-  ],
-  "owners": [
-    {
-      "player_name": "Collector1",
-      "count": 50
-    },
-    {
-      "player_name": "Collector2",
-      "count": 25
-    }
-  ],
-  "price_history": [
-    {
-      "date": "2025-12-01",
-      "average_price": 32500.5,
-      "sales": 12
-    },
-    {
-      "date": "2025-12-02",
-      "average_price": 33000.0,
-      "sales": 8
-    }
-  ]
-}
-```
-
-**Response Fields:**
-| Field | Type | Description |
-|-------|------|-------------|
-| skin_index | int | The skin index queried |
-| total_listings | int | Total number of active listings |
-| lowest_price | int | Lowest listed price (0 if no listings) |
-| average_price | float | Average sale price from last 7 days |
-| total_circulating | int | Total quantity of this skin in circulation |
-| listings | object[] | Paginated list of active listings (sorted by price ascending) |
-| listings[].price | int | Listing price in KR |
-| listings[].seller_name | string | Seller's username |
-| listings[].listed_at | string | When the listing was created |
-| owners | object[] | First 100 owners sorted by quantity owned (descending) |
-| owners[].player_name | string | Owner's username |
-| owners[].count | int | Number of this skin the player owns |
-| price_history | object[] | Daily average sale prices for the last 30 days |
-| price_history[].date | string | Date (YYYY-MM-DD format) |
-| price_history[].average_price | float | Average sale price on that day |
-| price_history[].sales | int | Number of sales on that day |
-
-**Notes:**
-- Listings are sorted by price (lowest first)
-- Page size is fixed at 10 records for listings
-- `average_price` is calculated from sales in the last 7 days
-- Owners list shows up to 100 players, sorted by quantity owned (highest first)
-- Banned users are excluded from the owners list
-- `price_history` contains daily averages for days with sales in the last 30 days (useful for charting)
-
----
-
-## Error Responses
-
-All endpoints return standard error responses:
-
-| Status Code | Description |
-|-------------|-------------|
-| 400 | Bad request (missing or invalid parameters) |
-| 403 | Forbidden (invalid API key) |
-| 404 | Resource not found |
-| 429 | Rate limit exceeded |
-| 500 | Internal server error |
-
-**Error Response Format:**
-```json
-{
-  "error": "Error message description"
-}
-```
+[readme]: README.md

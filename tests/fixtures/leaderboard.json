@@ -1,0 +1,20 @@
+{
+  "page": 1,
+  "per_page": 10,
+  "season": 5,
+  "region": 0,
+  "entries": [
+    {
+      "position": 1,
+      "player_name": "TopPlayer",
+      "mmr": 2500,
+      "wins": 150,
+      "losses": 50,
+      "kills": 3000,
+      "deaths": 1500,
+      "assists": 800,
+      "score": 50000,
+      "damage_done": 450000
+    }
+  ]
+}
